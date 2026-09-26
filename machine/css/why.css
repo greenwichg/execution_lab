@@ -45,6 +45,7 @@
 .cols-grid .c.hl { background: var(--hl); }
 .cols-grid .c.res { border-top: 2px solid var(--ink); }
 .cols-grid .c.lost { color: var(--bad); text-decoration: line-through; text-decoration-thickness: 2px; border-top: 2px solid var(--ink); }
+.cols-grid .c.dropped { color: var(--muted); text-decoration: line-through; border-top: 2px solid var(--ink); }
 .cols-grid .c-label { font-size: .9rem; color: var(--muted); text-align: right; padding-right: 8px; }
 .cols-grid .c-label.carry-row { font-size: .66rem; text-transform: uppercase; letter-spacing: .06em; }
 .cols-grid .c-right { font: 500 .88rem/1 var(--sans); color: var(--muted); padding-left: 10px; white-space: nowrap; }

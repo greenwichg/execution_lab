@@ -94,14 +94,16 @@ const RENDER = {
     ], carries[0] === 1 ? (base ? `from bit ${base - 1}` : sub ? '+1' : '') : '', 'carry-row');
     row('', [cell('', null, w), ...range(w).map((i) => cell(String(d.a[i] ?? ''), 'bit', i))], d.labels?.a, 'a-row');
     row(sub ? '+¬' : '+', [cell('', null, w), ...range(w).map((i) => cell(String(d.b[i] ?? ''), 'bit', i))], d.labels?.b, 'b-row');
+    // in a subtraction the dropped carry is not an error: dropping it is what makes a + ¬b + 1 = a − b
     row('', [
-      cell(lost ? '1' : carries[w] === 1 && d.result?.length > w ? '1' : '', [lost ? 'lost' : 'bit', 'res'], w),
+      cell(lost ? '1' : carries[w] === 1 && d.result?.length > w ? '1' : '', [lost ? (sub ? 'dropped' : 'lost') : 'bit', 'res'], w),
       ...range(w).map((i) => cell(String(d.result?.[i] ?? ''), ['bit', 'res'], i)),
     ], d.labels?.r, 'r-row');
-    const summary = `${d.labels?.a ?? bitStr(d.a)} ${sub ? 'minus' : 'plus'} ${d.labels?.b ?? bitStr(d.b)}${base ? `, bits ${base + w - 1} to ${base}` : ` in ${w} bits`}: result ${bitStr(d.result || [])}${lost ? '; the carry out of the top column is lost' : ''}.`;
+    const summary = `${d.labels?.a ?? bitStr(d.a)} ${sub ? 'minus' : 'plus'} ${d.labels?.b ?? bitStr(d.b)}${base ? `, bits ${base + w - 1} to ${base}` : ` in ${w} bits`}: result ${bitStr(d.result || [])}${lost ? (sub ? '; the carry out of the top column is dropped, as a subtraction needs' : '; the carry out of the top column is lost') : ''}.`;
     return h('div', { class: 'cols', role: 'img', 'aria-label': summary },
       grid,
-      lost ? h('p', { class: 'cols-note small' }, h('span', { class: 'lost-mark', 'aria-hidden': 'true' }, '1'), ` lost — it was worth ${(2n ** BigInt(base + w)).toLocaleString('en-GB')}, but there is no bit ${base + w} to keep it.`) : null,
+      lost && !sub ? h('p', { class: 'cols-note small' }, h('span', { class: 'lost-mark', 'aria-hidden': 'true' }, '1'), ` lost — it was worth ${(2n ** BigInt(base + w)).toLocaleString('en-GB')}, but there is no bit ${base + w} to keep it.`) : null,
+      lost && sub ? h('p', { class: 'cols-note small muted' }, `The carry out of bit ${base + w - 1} is dropped — that is exactly what makes a + ¬b + 1 equal a − b.`) : null,
       base ? h('p', { class: 'cols-note small muted' }, `Only the top ${w} bits (${base + w - 1}–${base}) are shown; the carry into bit ${base} comes up from the bits below.`) : null,
       sub ? h('p', { class: 'cols-note small muted' }, base ? 'Subtraction is done as an addition: every bit of the second number is inverted (¬) and 1 is added at bit 0.' : 'Subtraction is done as an addition: invert every bit of the second number (¬) and add 1.') : null);
   },
