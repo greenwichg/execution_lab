@@ -134,8 +134,9 @@ const keyOf = (e) => `${e.spec}|${e.tag || ''}`;
  * pools keep their ranking; other pools prefer a spec point not yet in the
  * plan, so five questions cover as much ground as the history allows.
  */
-function takeFrom(pools, plan) {
+function takeFrom(pools, plan, reserved = null) {
   const keys = new Set(plan.map(keyOf));
+  if (reserved) keys.add(reserved);
   const specs = new Set(plan.map((e) => e.spec));
   for (const { list, diverse } of pools) {
     const fresh = list.filter((e) => !keys.has(keyOf(e)));
@@ -170,26 +171,37 @@ export function buildStarter(classState, today, rng) {
   const taughtDay = new Map(taught.map((t) => [t.spec, t.day]));
   const untaught = specsForLevel(level).filter((s) => !taughtDay.has(s.id))
     .map((s) => ({ source: 'new', spec: s.id, tag: null, note: 'Not marked as taught yet.' }));
-  const newEntry = newest ? [{ source: 'new', spec: newest.spec, tag: null, note: `Taught most recently (${ago(day - newest.day)}).` }] : [];
+  // The newest point goes in as 'new' only while the class has no open miss on
+  // it; otherwise it belongs in a missed slot, and 'new' is the next-newest.
+  const openMiss = new Set(missed.map((e) => e.spec));
+  const freshest = taught.find((t) => !openMiss.has(t.spec)) || null;
+  const newEntry = freshest
+    ? [{ source: 'new', spec: freshest.spec, tag: null, note: freshest === newest ? `Taught most recently (${ago(day - freshest.day)}).` : `Taught ${ago(day - freshest.day)}; the newest point is a recent miss.` }]
+    : [];
+  const newestMissed = newest && openMiss.has(newest.spec) ? missed.filter((e) => e.spec === newest.spec) : [];
   const sourceOf = (id) => (taughtDay.has(id) && day - taughtDay.get(id) >= SPACED_MIN ? 'spaced' : 'new');
   const variants = variantCandidates([...taught.map((t) => t.spec), ...specsForLevel(level).map((s) => s.id)], sourceOf, r);
 
   const pool = (list, diverse = true) => ({ list, diverse });
   const POOLS = {
-    new: [pool(newEntry), pool(recentTaught), pool(untaught), pool(spaced), pool(olderTaught), pool(missed, false), pool(variants)],
+    new: [pool(newestMissed, false), pool(newEntry), pool(recentTaught), pool(untaught), pool(spaced), pool(olderTaught), pool(missed, false), pool(variants)],
     missed: [pool(missed, false), pool(spaced), pool(olderTaught), pool(recentTaught), pool(untaught), pool(variants)],
     spaced: [pool(spaced), pool(olderTaught), pool(missed, false), pool(recentTaught), pool(untaught), pool(variants)],
   };
 
-  // Fill 'new' first when it is a fixed choice (the newest taught point), then
-  // the missed and spaced slots. With nothing taught, 'new' is only a filler,
-  // so it goes last: filled first it would take a point the class just missed
+  // Missed slots first (what the class got wrong matters most), then 'new'
+  // when it is a fixed choice (a taught point), then spaced. If the newest
+  // point is an open miss that did not make the missed slots, the 'new' slot
+  // takes it, labelled 'missed'. With nothing taught, 'new' is only a filler,
+  // so it goes last: filled early it would take a point the class just missed
   // and label it "not taught yet".
   const plan = [];
   const filled = new Array(SLOTS.length).fill(null);
-  const fillOrder = newest ? [4, 0, 1, 2, 3] : [0, 1, 2, 3, 4];
+  const fillOrder = newest ? [0, 1, 4, 2, 3] : [0, 1, 2, 3, 4];
+  // Slots filled before 'new' must leave its point for it.
+  const reserved = newEntry.length ? keyOf(newEntry[0]) : null;
   for (const i of fillOrder) {
-    const e = takeFrom(POOLS[SLOTS[i]], plan);
+    const e = takeFrom(POOLS[SLOTS[i]], plan, SLOTS[i] === 'new' ? null : reserved);
     if (e) { plan.push(e); filled[i] = e; }
   }
   return filled.filter(Boolean).map(({ source, spec, tag, note }) => (tag ? { source, spec, tag, note } : { source, spec, note }));

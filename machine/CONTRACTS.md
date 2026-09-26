@@ -429,12 +429,19 @@ MODES = ['normal','study','delayed'], ARM_UNKNOWN = 2, ARM_NONE = 3
 // src/learn/scheduler.js — every function returns a NEW state (never mutates)
 emptyState(); dayNumber(date?); dayToDate(day); toDay(day|Date) (RangeError otherwise); itemKey(type, params)
 recordAttempt(state, { type: TYPE_ID|TYPE, params: int[] (encodeParams), correct, tag?: diagnosis tagId,
-  target?: tagId the item aimed at, group?: 'drill'|'holdout', today, review?: bool }) → state
+  target?: tagId the item aimed at, group?: 'drill'|'holdout'|'set', today, review?: bool }) → state
+  // group 'set': a homework/study set question — spaced exactly like drill, but never counted in the
+  // drill/holdout evidence (sets choose their own feedback). The set view passes 'set' for every slot.
+  // session misses (fading().showWorked) count only the diagnosis `tag`: an empty or unclassified
+  // answer on an item aimed at `target` is not a miss of `target`.
 dueEntries(state, today) → Entry[]; activeEntries(state) → Entry[] (for encodeQueue); queueSummary(state, today) → { due, later, next: day|null }
-Entry = { key, type: TYPE_ID, params: int[], tag: tagIndex, group, stage: 0|1|2, due, miss, done: day|null, measured }
-mergeQueue(state, entries, today) → { state, added }   // skips entries whose params do not decode to the same ints, have w outside 4–16, or do not build; due capped at today + interval
+Entry = { key, type: TYPE_ID, params: int[], tag: tagIndex, group: 'drill'|'holdout'|'set', stage: 0|1|2, due, miss, done: day|null, measured }
+  // stored entries that no longer build, or have a negative due day, are dropped on load
+mergeQueue(state, entries, today) → { state, added, skipped }   // skips entries whose params do not decode to the same ints, have w outside 4–16, or do not build; due capped at today + interval
+  // never removes an entry already on the device: once the queue holds MAX_QUEUE (60) entries, new ones
+  // are left out. added = entries actually kept; skipped = new entries left out because the queue is full
 fading(state, tagId) → { collapseWhy, showWorked }; noteWorked(state, tagId) → state (after showing it)
-resetSession(state, seed) → state; isHoldout(seed, index) → bool; reviewAccuracy(state) → { drill: {right,total}, holdout: {right,total} }
+resetSession(state, seed) → state; isHoldout(seed, index) → bool; reviewAccuracy(state) → { drill: {right,total}, holdout: {right,total} }   // 'set' entries never counted
 // src/learn/study.js
 FAMILY_TOPIC = { A: 'add', B: 'shift' }; studySpecs(level) → { A: specId, B: specId }
 assignArm(seed) → 0|1; feedbackFor(arm, family, mode = 'study') → 'full'|'answerOnly'
@@ -447,9 +454,12 @@ summarizeSet(results /* per slot: { correct, tag } | null */, plan, { setId, mod
 newClass({ id, name, level }) → { v, id, name, level, taught: { specId: day }, taps: [{ day, spec, tag, result }] }
 setTaught(cls, specId, day|null) → cls; recordTap(cls, { spec, tag?, result: 'got'|'split'|'missed', date: Date|day }) → cls
 buildStarter(cls, today, rng) → 5 × { source, spec, tag?, note }   // note: one short line for the teacher
+  // missed slots are filled first; the newest taught point is 'new' only while the class has no open
+  // miss on it (otherwise it is a 'missed' entry and 'new' is the next-newest point without one)
 // src/learn/board.js
 rows: [{ line, code, setId, mode, g1, g2, arm, tags, right, total, score, dupOf: line|null }]
-invalid: [{ line, text, error }]; tagCounts: [{ tag, index, label, count, of }]  (count = codes listing the tag)
+invalid: [{ line, text, error }]; tagCounts: [{ tag, index, label, count, of, unclassified? }]  (count = codes listing the tag)
+  // 'other' (only in older codes: summarizeSet never lists it) sorts last with unclassified: true
 completion: { codes, unique, duplicates, sets: [{ setId, count }], expected: n|null, finished: count|null }
 study: null | { study: Block|null, delayed: Block|null }
 Block = { n, unknownArm, arms: [{ arm, n, A: {right,total,acc}, B: {…} }] (arm 0, 1),

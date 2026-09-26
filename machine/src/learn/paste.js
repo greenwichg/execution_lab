@@ -326,8 +326,81 @@ function writeEvents(prog, res) {
   const lastOf = new Map();
   out.forEach((w, k) => lastOf.set(w.v, k));
   for (const w of out) w.last = lastOf.get(w.v) === w.k;
+  markLoopHeaders(prog, res, out);
   return out;
 }
+
+/** ids of the variables a printf reads (a learner can see those values in the output) */
+function printedVars(prog) {
+  const ids = new Set();
+  for (const ins of prog.insts) {
+    if (!ins.stmt || ins.stmt.k !== 'printf' || !ins.b || typeof ins.b !== 'object' || !ins.b.m) continue;
+    const vr = prog.vars.find((x) => x.d === ins.b.d);
+    if (vr) ids.add(vr.id);
+  }
+  return ids;
+}
+
+/**
+ * Writes made by a for-loop header (for (int i = 0; …; i++)): header 'init' | 'step', the loop
+ * pass they start (init starts pass 1, each step the next one), which time the loop is entered,
+ * and whether the loop finishes straight after (the test fails). A learner counts passes, not
+ * "the 6th time line 3 runs", so the bisection only asks about these when the variable is printed
+ * or nothing else is left to ask.
+ */
+function markLoopHeaders(prog, res, out) {
+  const printed = printedVars(prog);
+  const kinds = new Map();              // `${line}|${v}` → Set of 'init' / 'step' (for writes past the trace)
+  for (const ins of prog.insts) {
+    if (ins.ctl !== 'init' && ins.ctl !== 'step') continue;
+    const vr = prog.vars.find((x) => storesInto(ins, x));
+    if (!vr) continue;
+    const key = `${ins.line}|${vr.id}`;
+    if (!kinds.has(key)) kinds.set(key, new Set());
+    kinds.get(key).add(ins.ctl);
+  }
+  const evs = res.events || [];
+  const state = new Map();
+  for (const w of out) {
+    w.printed = printed.has(w.v);
+    w.header = null;
+    if (w.final) continue;
+    const key = `${w.line}|${w.v}`;
+    let kind = null;
+    if (w.n !== null && w.n !== undefined) {
+      const c = prog.insts[evs[w.n].i].ctl;
+      kind = c === 'init' || c === 'step' ? c : null;
+    } else if (kinds.has(key)) {
+      const ks = kinds.get(key);
+      kind = ks.size === 1 ? [...ks][0] : state.has(key) ? 'step' : 'init';
+    }
+    if (!kind) continue;
+    const st = state.get(key) || { entry: 0, pass: 1 };
+    if (kind === 'init') { st.entry += 1; st.pass = 1; } else { st.entry = Math.max(1, st.entry); st.pass += 1; }
+    state.set(key, st);
+    w.header = kind;
+    w.pass = st.pass;
+    w.entry = st.entry;
+    w.finishes = loopFinishesAfter(prog, evs, w);
+  }
+  for (const w of out) if (w.header) w.entries = state.get(`${w.line}|${w.v}`).entry;
+}
+
+/** after a header write, does the loop test fail (true), pass (false) or is it unknown (past the trace)? */
+function loopFinishesAfter(prog, evs, w) {
+  if (w.n === null || w.n === undefined) return w.last ? true : null;
+  for (let m = w.n + 1; m < evs.length; m++) {
+    const ins = prog.insts[evs[m].i];
+    if (ins.line !== w.line || ins.ctl !== 'cond' || (ins.op !== 'j' && ins.op !== 'jmp')) continue;
+    const next = evs[m + 1];
+    if (!next) return null;
+    return next.i === ins.i + 1;        // falling through the jump back to the body leaves the loop
+  }
+  return null;
+}
+
+/** a loop-header write the learner cannot see and would have to count: asked only as a last resort */
+const quiet = (w) => !!w.header && !w.printed;
 
 // ---------------------------------------------------------------------------
 // Beyond the trace: a long loop can run past TRACE_LIMIT instructions. The
@@ -566,14 +639,19 @@ function nextProbe(writes, lo, hi, skip) {
   const askable = n <= LONG_RUN ? () => true : (k) => { const w = writes[k]; return w.last || w.final || w.times === 1 || !!w.surprise; };
   let total = 0;
   for (let k = lo + 1; k <= hi; k++) total += wt(k);
-  let best = null, bestGap = Infinity, left = 0;
-  for (let k = lo + 1; k < hi; k++) {
-    left += wt(k);
-    if (skip.has(k) || !askable(k)) continue;
-    const gap = Math.abs(left - (total - left));
-    if (gap < bestGap) { best = k; bestGap = gap; }
-  }
-  return best;
+  const pickBest = (allowQuiet) => {
+    let best = null, bestGap = Infinity, left = 0;
+    for (let k = lo + 1; k < hi; k++) {
+      left += wt(k);
+      if (skip.has(k) || !askable(k) || (!allowQuiet && quiet(writes[k]))) continue;
+      const gap = Math.abs(left - (total - left));
+      if (gap < bestGap) { best = k; bestGap = gap; }
+    }
+    return best;
+  };
+  // loop-header writes (for-init, i++) only when the variable is printed or nothing else is left
+  const best = pickBest(false);
+  return best !== null ? best : pickBest(true);
 }
 
 function replay(writes, cpAnswers) {
@@ -594,12 +672,20 @@ function replay(writes, cpAnswers) {
 }
 
 /** ' (the 3rd time it runs)' when the line runs more than once (times is null past the trace) */
-const whenOf = (w) => (w.nth && (w.times > 1 || (w.times === null && w.nth > 1)) ? ` (the ${ordinal(w.nth)} time it runs)` : '');
+const whenOf = (w) => (w.header ? ` (${passOf(w, '')})` : w.nth && (w.times > 1 || (w.times === null && w.nth > 1)) ? ` (the ${ordinal(w.nth)} time it runs)` : '');
+
+/** 'at the start of pass 3 of the loop on line 2' / 'when the loop on line 2 finishes' for a for-header write */
+function passOf(w, where = ` on line ${w.line}`) {
+  const which = w.entries > 1 ? ` (the ${ordinal(w.entry)} time that loop runs)` : '';
+  return w.finishes ? `when the loop${where} finishes${which}` : `at the start of pass ${w.pass} of the loop${where}${which}`;
+}
 
 function checkpointFor(w, q) {
   return {
     id: `paste-cp${q}`,
-    prompt: w.final ? `What value does ${w.name} end up with?` : `What is ${w.name} after line ${w.line}${whenOf(w)}?`,
+    prompt: w.final ? `What value does ${w.name} end up with?`
+      : w.header ? `What is ${w.name} ${passOf(w)}?`
+        : `What is ${w.name} after line ${w.line}${whenOf(w)}?`,
     input: { kind: 'number' },
     // beyond ±2^53 a Number would show the wrong digits, so the exact BigInt is kept
     answer: w.val,
@@ -714,7 +800,9 @@ export function diagnosePaste(analysis, predicted, cpAnswers = []) {
   const last = Math.min(r.hi, n - 1);
   let k = null;
   for (let j = r.lo + 1; j <= last; j++) if (writes[j].surprise) { k = j; break; }
-  if (k === null) k = r.hi < n ? r.hi : r.lo + 1;
+  if (k === null && r.hi < n) k = r.hi;
+  // unconfirmed: the first write in range, passing over loop-header writes the learner never sees
+  if (k === null) { k = r.lo + 1; for (let j = r.lo + 1; j <= last; j++) if (!quiet(writes[j])) { k = j; break; } }
   const w = writes[k];
   const confirmed = k === r.hi && r.hi - r.lo === 1;
   const when = whenOf(w);

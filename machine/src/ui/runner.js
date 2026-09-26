@@ -9,6 +9,7 @@ import { TAGS } from '../learn/catalogue.js';
 import { button, chip, seg, confidence, callout, statusGlyph } from './parts.js';
 import { bitRow, bitInput, addGrid } from './bitgrid.js';
 import { renderWhy, renderLayer } from './why.js';
+import * as cardHooks from './cardhooks.js';
 
 const FLAG_NAMES = ['CF', 'ZF', 'SF', 'OF'];
 const LONG_FLAG = { CF: 'Carry flag (CF)', ZF: 'Zero flag (ZF)', SF: 'Sign flag (SF)', OF: 'Overflow flag (OF)' };
@@ -28,6 +29,10 @@ export function moduleFor(item) {
  * mountItem(el, item, opts) — see CONTRACTS.md "UI contract".
  */
 export function mountItem(el, item, opts = {}) {
+  // A card in a review or a set still needs its C program and, after Check, its verdicts
+  if (item.type === 'card' && !opts.beforePrompt && !opts.afterReveal) {
+    opts = { ...opts, beforePrompt: cardHooks.beforePrompt, afterReveal: cardHooks.afterReveal };
+  }
   const mod = moduleFor(item);
   const level = opts.level || item.level || 'gcse';
   const feedback = opts.feedback || 'full';
@@ -327,7 +332,8 @@ function fieldControl(f, item, answer) {
   const multiline = f.kind === 'text' && f.multiline !== false;
   const input = multiline
     ? h('textarea', { class: 'mono', rows: String(f.rows || 3), 'aria-label': f.label, spellcheck: 'false' })
-    : h('input', { type: 'text', inputmode: f.kind === 'number' ? 'numeric' : 'text', 'aria-label': f.label, class: f.kind === 'number' ? 'num-in' : 'mono', autocomplete: 'off', spellcheck: 'false' });
+    // no inputmode="numeric": phone number pads (iOS) have no minus sign or decimal point
+    : h('input', { type: 'text', inputmode: 'text', 'aria-label': f.label, class: f.kind === 'number' ? 'num-in' : 'mono', autocomplete: 'off', spellcheck: 'false' });
   input.addEventListener('input', () => { answer[f.id] = f.kind === 'number' ? (f.decimal ? parseDecimal(input.value) : parseWhole(input.value)) : input.value; });
   const note = h('span', { class: 'field-note' });
   const el = h('div', { class: ['field', `field-${f.kind}`] }, h('label', { class: 'field-label' }, f.label, input), note);
@@ -364,7 +370,7 @@ export function checkpointInput(cp, onChange) {
     const row = bitRow(w, { values, label: 'Your answer', dir: 'right', onChange: () => onChange(values.slice()) });
     return { el: row.el, focus: () => row.focusStart(), disable: () => row.lock([], []) };
   }
-  const input = h('input', { type: 'text', inputmode: 'numeric', class: 'num-in', 'aria-label': cp.prompt, autocomplete: 'off' });
+  const input = h('input', { type: 'text', class: 'num-in', 'aria-label': cp.prompt, autocomplete: 'off' });
   input.addEventListener('input', () => onChange(parseWhole(input.value)));
   return { el: input, focus: () => input.focus(), disable: () => { input.readOnly = true; } };
 }

@@ -43,12 +43,14 @@ async function open(query = '', opts = {}) {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, isMobile, hasTouch });
   const page = await context.newPage();
   const errors = [], infos = [];
+  // capped: a page stuck in an error loop must fail its test, not exhaust memory
+  const keep = (list, msg) => { if (list.length < 200) list.push(msg); };
   page.on('console', (m) => {
     const t = m.type();
-    if (t === 'error' || t === 'warning') errors.push(`[${t}] ${m.text()}`);
-    else infos.push(`[${t}] ${m.text()}`);
+    if (t === 'error' || t === 'warning') keep(errors, `[${t}] ${m.text()}`);
+    else keep(infos, `[${t}] ${m.text()}`);
   });
-  page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}`));
+  page.on('pageerror', (e) => keep(errors, `[pageerror] ${e.message}`));
   await page.route('https://cdn.jsdelivr.net/**', (r) => r.fulfill({ path: THREE_JS, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } }));
   await page.route('https://unpkg.com/**', (r) => r.abort());
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ body: '', headers: { 'content-type': 'text/css' } }));

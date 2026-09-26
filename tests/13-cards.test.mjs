@@ -357,10 +357,55 @@ test('the branch card: a signed reading is located by checkpoints and tagged c_j
     const d2 = runFlow(item, { branch: wrong }, (cp) => (cp.input.kind === 'number' ? -item.sim.vals.k : cp.answer));
     assert.equal(d2.tag, 'c_usual_conversions');
     assert.equal(d2.steps, 2);
-    // "Not sure" to everything is not evidence: still a diagnosis within 3
+    // "Not sure" to everything is not evidence: no "you know the pieces", no misconception tag
     const d3 = runFlow(item, { branch: wrong }, () => null);
-    assert.ok(d3.steps <= 3 && d3.tag);
+    assert.ok(d3.steps <= 3);
+    assert.equal(d3.tag, 'other');
+    assert.equal(d3.headline, 'Not quite.');
+    // one right answer and the rest "Not sure": now the fallback has evidence
+    let q = 0;
+    const d4 = runFlow(item, { branch: wrong }, (cp) => (q++ === 0 ? cp.answer : null));
+    assert.equal(d4.tag, 'c_jump_signedness');
+    assert.match(d4.headline, /know the pieces/);
   }
+});
+
+test('every card: "Not sure" to every checkpoint never names a misconception', () => {
+  let flows = 0;
+  for (const item of INSTANCES) {
+    const f = item.fields[0];
+    if (f.kind === 'flags') continue;                     // the flags card asks no checkpoints
+    const right = item.key[f.id];
+    const odd = f.kind === 'choice' ? f.choices.find((c) => c !== right) : f.kind === 'number' ? 987654 : 'no idea at all';
+    const d = runFlow(item, { [f.id]: odd }, () => null);
+    if (d.steps === 0) continue;                           // a classic wrong answer, recognised without checkpoints
+    assert.equal(d.tag, 'other', `${item.params.id} v${item.params.v}: ${d.headline}`);
+    assert.ok(!/know the pieces/.test(d.headline));
+    flows++;
+  }
+  assert.ok(flows > 300, `${flows} flows`);
+});
+
+test("comparison cards: the lab's cmp / set / jump match gcc -O0's operand order and condition", { skip: !HAVE_GCC && 'gcc not installed' }, () => {
+  let checked = 0;
+  for (const id of ['minus-one-vs-unsigned', 'signed-unsigned-branch']) {
+    const items = INSTANCES.filter((it) => it.params.id === id);
+    const asm = gccAsm(`order_${id.replace(/\W/g, '_')}`, items.map((it) => it.card.src));
+    items.forEach((it, k) => {
+      // memory operands as M, gcc's aliases as the lab spells them, jump targets dropped
+      const shape = (l) => l.replace(/\s+/g, ' ').replace(/DWORD PTR (\[rbp-\d+\]|-?\d+\[rbp\])/, 'M').replace(/^setnb/, 'setae').replace(/^jnb/, 'jae').replace(/^(j\w+) .*/, '$1');
+      const pick = (lines) => lines.map(shape).filter((l) => /^(cmp|set|j(?!mp))/.test(l));
+      const ours = pick(it.sim.prog.insts.filter((x) => x.line === 3).map((x) => x.asText));
+      assert.deepEqual(ours, pick(asm[k]), `${id} v${it.params.v}`);
+      // what the Why layers say about CF is what the gcc text says
+      const flags = cards.why(it, null, {}).find((l) => l.kind === 'flags');
+      const cf = it.sim.cmp.flagsAfter.CF;
+      assert.match(flags.say[0], new RegExp(`^CF = ${cf}`));
+      if (/cmp b, a/.test(it.card.gcc)) assert.equal(cf, 1, `${id} v${it.params.v}: gcc's cmp b, a borrows`);
+      checked++;
+    });
+  }
+  assert.ok(checked > 150);
 });
 
 test('the flags card: CF from the signed reading → flags_sub_carry; a missed OF → flags_signed_overflow_missed', () => {
@@ -635,6 +680,10 @@ function plantedReply(analysis, j) {
     return w.k < j ? cp.answer : cp.answer + 7;
   };
 }
+// "after line 3 (the 6th time it runs)" is never used for a for-loop header: a learner counts passes
+const PROMPT = new RegExp('^(What is \\w+ after line \\d+( \\(the \\d+(st|nd|rd|th) time it runs\\))?\\?'
+  + '|What is \\w+ (at the start of pass \\d+ of|when) the loop on line \\d+( finishes)?( \\(the \\d+(st|nd|rd|th) time that loop runs\\))?\\?'
+  + '|What value does \\w+ end up with\\?)$');
 function runPaste(analysis, predicted, reply) {
   const cps = [];
   for (let n = 0; n <= 3; n++) {
@@ -642,7 +691,7 @@ function runPaste(analysis, predicted, reply) {
     if (!r.next) return { ...r.diagnosis, steps: n };
     assert.ok(n < 3, 'more than 3 checkpoints');
     assert.equal(r.next.input.kind, 'number');
-    assert.match(r.next.prompt, /^(What is \w+ after line \d+( \(the \d+(st|nd|rd|th) time it runs\))?\?|What value does \w+ end up with\?)$/);
+    assert.match(r.next.prompt, PROMPT);
     cps.push(reply(r.next));
   }
   throw new Error('unreachable');
@@ -709,6 +758,60 @@ test('paste: bisection finds a planted divergence in ≤ 3 checkpoints', () => {
     cases++;
   }
   assert.ok(cases >= 15, `${cases} planted divergences`);
+});
+
+test('paste: for-loop headers are asked about as loop passes, and only when nothing else will do', () => {
+  // the review's learner: counts loop passes correctly but forgets that unsigned char wraps
+  const a = analyzePaste(PROGRAMS.byteLoop);
+  const model = analyzePaste(PROGRAMS.byteLoop.replace('unsigned char c', 'int c'));
+  assert.equal(model.events.length, a.events.length);
+  const asked = [];
+  const d = runPaste(a, '258 2036', (cp) => { asked.push(cp); return model.events[cp.event].val; });
+  assert.ok(!/after line 3\b/.test(asked.map((cp) => cp.prompt).join(' | ')), asked.map((cp) => cp.prompt).join(' | '));
+  assert.notEqual(a.events[asked[0].event].name, 'i', 'the first question is not about the loop counter');
+  assert.equal(d.focus.line, 4);
+  assert.equal(d.tag, a.events[d.focus.event].surprise.tag);
+  assert.equal(a.events[d.focus.event].val, 0);
+  // any loop-counter question is phrased as a pass of the loop, and the value is the one a pass-counter gives
+  for (const cp of asked) {
+    const w = a.events[cp.event];
+    if (w.name !== 'i') continue;
+    assert.match(cp.prompt, /^What is i (at the start of pass (\d+) of|when) the loop on line 3/);
+    const pass = Number((cp.prompt.match(/pass (\d+)/) || [])[1]);
+    assert.equal(cp.answer, pass - 1);
+  }
+  // header writes: init starts pass 1, the last step finishes the loop
+  const hs = a.events.filter((w) => w.header);
+  assert.deepEqual(hs.map((w) => w.pass), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(hs.map((w) => !!w.finishes), [false, false, false, false, false, false, false, false, true]);
+  // "Not sure" to everything still finds the wrapping line
+  const unsure = runPaste(a, '258 2036', () => null);
+  assert.equal(unsure.focus.line, 4);
+  // a printed counter may be asked about, but never as "the 4th time line 1 runs"
+  const printedLoop = analyzePaste('for (char c = 125; c > 0; c++)\n  printf("%d\\n", c);');
+  const prompts = [];
+  runPaste(printedLoop, '125\n126\n127\n128', (cp) => { prompts.push(cp.prompt); return null; });
+  assert.ok(prompts.length && prompts.every((p) => /(at the start of pass \d+ of|when) the loop on line 1/.test(p)), prompts.join(' | '));
+  // a break: the pass that starts still runs, so it is not "when the loop finishes"
+  const brk = analyzePaste('int s = 0;\nfor (int i = 0; i < 10; i++) {\n  if (i == 3) break;\n  s = s + i;\n}\nprintf("%d\\n", s);');
+  const last = brk.events.filter((w) => w.header).pop();
+  assert.equal(last.pass, 4);
+  assert.ok(!last.finishes);
+  // nested loops: the inner loop's passes restart each time it runs
+  const nest = analyzePaste('int n = 0;\nfor (int i = 0; i < 2; i++)\n  for (int j = 0; j < 3; j++)\n    n = n + j;\nprintf("%d\\n", n);');
+  const inner = nest.events.filter((w) => w.name === 'j');
+  assert.deepEqual(inner.map((w) => [w.entry, w.pass]), [[1, 1], [1, 2], [1, 3], [1, 4], [2, 1], [2, 2], [2, 3], [2, 4]]);
+});
+
+test('paste: an unsigned > or <= (compiled as cmp b, a) still names the converted signed value', () => {
+  for (const [src, v] of [['int a = -5;\nunsigned b = 3;\nint gt = a > b;\nprintf("%d\\n", gt);', 'gt'], ['unsigned b = 3;\nint a = -5;\nint le = b <= a;\nprintf("%d\\n", le);', 'le']]) {
+    const a = analyzePaste(src);
+    const w = a.events.find((x) => x.name === v);
+    assert.equal(w.surprise?.tag, 'c_usual_conversions', src);
+    const d = runPaste(a, '0', (cp) => (a.events[cp.event].surprise ? cp.answer + 1 : cp.answer));
+    assert.equal(d.tag, 'c_usual_conversions');
+    assert.match(d.detail, /-5 is compared as 4294967291/);
+  }
 });
 
 test('paste: values all right → the output line; "Not sure" is not evidence', () => {

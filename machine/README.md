@@ -80,6 +80,8 @@ it runs on a £200 Chromebook with no GPU.
 - `CONTRACTS.md`: module contracts (items, diagnosis, Why layers, engine,
   codes, scheduler, study).
 - `UI-BRIEF.md`: every screen, its behaviour and tone.
+- `REQUIREMENTS.md`: each requirement, the code that meets it and the tests
+  that check it.
 - `src/engine/`:
   - `minic.js`: C → x86-64 compiler, assembler and emulator with all C
     integer types.

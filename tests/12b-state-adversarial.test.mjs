@@ -671,3 +671,157 @@ test('sets: summarizeSet tolerates missing, short, long and odd result lists; it
   }
   assert.ok(SPECS.length > 0);
 });
+
+// ---------------------------------------------------------------------------
+// Review regressions (security #1, #7; bugs #7, #12; requirements #11, #13)
+// ---------------------------------------------------------------------------
+
+const RD = 20000;
+/** n distinct add misses on day `day` */
+function missesOn(state, n, day, a0 = 20) {
+  let s = state;
+  for (let k = 0; k < n; k++) {
+    s = sched.recordAttempt(s, { type: 'add', params: ITEM_TYPES.add.encodeParams({ w: 8, a: a0 + k, b: 100, ask: 'full' }), correct: false, tag: 'add_no_carry', today: day });
+  }
+  return s;
+}
+const linkEntries = (n, a0) => Array.from({ length: n }, (_, k) => ({
+  type: 0, params: ITEM_TYPES.add.encodeParams({ w: 12, a: a0 + k, b: 100, ask: 'full' }), tag: 2, due: RD + 2, stage: 0, group: 'drill',
+}));
+
+test('mergeQueue never evicts what is already on the device, and reports what it really kept', () => {
+  const mine = missesOn(sched.emptyState(), 5, RD - 3);
+  const ownKeys = mine.queue.map((e) => e.key);
+  for (const [n, added, skipped] of [[60, 55, 5], [200, 55, 145], [3, 3, 0]]) {
+    const r = sched.mergeQueue(mine, linkEntries(n, 120), RD);
+    assert.equal(r.added, added, `link of ${n}`);
+    assert.equal(r.skipped, skipped, `link of ${n}`);
+    assert.equal(r.state.queue.length, 5 + added);
+    for (const k of ownKeys) assert.ok(r.state.queue.some((e) => e.key === k), `own entry ${k} kept`);
+  }
+  // a full queue takes nothing, and loses nothing
+  const full = missesOn(sched.emptyState(), sched.MAX_QUEUE, RD - 3);
+  const r = sched.mergeQueue(full, linkEntries(10, 120), RD);
+  assert.deepEqual([r.added, r.skipped], [0, 10]);
+  assert.deepEqual(r.state.queue.map((e) => e.key), full.queue.map((e) => e.key));
+  // entries already here are updated, not counted as skipped
+  const again = sched.mergeQueue(full, full.queue.map((e) => ({ ...e })), RD);
+  assert.deepEqual([again.added, again.skipped], [0, 0]);
+});
+
+test('damaged storage: entries that cannot be rebuilt, or have a negative day, are dropped; nothing throws', () => {
+  const good = missesOn(sched.emptyState(), 2, RD).queue;
+  const state = { ...sched.emptyState(), queue: [
+    ...good,
+    { type: 5, params: [999, 1], due: 1 },           // no such card
+    { type: 0, params: [8, 10, 20, 0, 1], due: -5 },  // negative day
+    { type: 1, params: [99999, 1, 0, 1, 0, 0, 0], due: RD },  // decodes to other ints
+  ] };
+  const due = sched.dueEntries(state, RD + 5);
+  assert.deepEqual(due.map((e) => e.key).sort(), good.map((e) => e.key).sort());
+  for (const e of due) makeItem(ITEM_TYPES[['add', 'shift', 'twos', 'sadd', 'fa', 'card'][e.type]].TYPE, ITEM_TYPES[['add', 'shift', 'twos', 'sadd', 'fa', 'card'][e.type]].decodeParams(e.params));
+  assert.equal(typeof codec.encodeQueue(sched.activeEntries(state)), 'string');
+  // odd shapes everywhere
+  const junk = [null, 7, 'x', [], { queue: {} }, { queue: [null, 1, 'a', [], { type: {}, params: 'no' }] },
+    { tags: [], session: 5, evidence: 'x' }, { tags: { a: null, b: 3 }, session: { misses: [], shown: null, seed: {} } },
+    { queue: [{ type: 0, params: [8, 1, 1, 0, 0], due: 1e300 }, { type: 0, params: [8, 1, 1, 0, 0], due: RD, tag: {}, stage: 'x', group: 9, miss: -4 }] }];
+  for (const s of junk) {
+    assert.doesNotThrow(() => {
+      sched.dueEntries(s, RD); sched.activeEntries(s); sched.queueSummary(s, RD); sched.reviewAccuracy(s);
+      sched.fading(s, 'add_or'); sched.noteWorked(s, 'add_or'); sched.resetSession(s, 1);
+      sched.mergeQueue(s, [{ type: 0, params: [8, 1, 1, 0, 0], due: RD }], RD);
+      sched.recordAttempt(s, { type: 'add', params: [8, 3, 4, 0, 0], correct: false, tag: 'add_or', today: RD });
+      codec.encodeQueue(sched.activeEntries(s));
+    }, JSON.stringify(s));
+  }
+  // the one usable entry in the last junk state survives, with a sane miss day
+  const kept = sched.activeEntries(junk[junk.length - 1]);
+  assert.equal(kept.length, 1);
+  assert.ok(kept[0].miss >= 0);
+});
+
+test('an empty or unclassified answer on a targeted variant is not a second miss of that tag', () => {
+  const p = ITEM_TYPES.twos.encodeParams({ w: 8, n: -42, task: 'encode' });
+  let s = sched.recordAttempt(sched.emptyState(), { type: 'twos', params: p, correct: false, tag: 'twos_sign_magnitude', today: RD });
+  const v = ITEM_TYPES.twos.encodeParams({ w: 8, n: -37, task: 'encode' });
+  for (const tag of [undefined, null, 'other']) {
+    const t = sched.recordAttempt(s, { type: 'twos', params: v, correct: false, tag, target: 'twos_sign_magnitude', today: RD });
+    assert.equal(t.session.misses.twos_sign_magnitude, 1, String(tag));
+    assert.equal(sched.fading(t, 'twos_sign_magnitude').showWorked, false, String(tag));
+  }
+  s = sched.recordAttempt(s, { type: 'twos', params: v, correct: false, tag: 'twos_sign_magnitude', target: 'twos_sign_magnitude', today: RD });
+  assert.equal(sched.fading(s, 'twos_sign_magnitude').showWorked, true);
+});
+
+test("set questions ('set' group) are spaced like drill but never count as drill/holdout evidence", () => {
+  const p = ITEM_TYPES.add.encodeParams({ w: 8, a: 77, b: 99, ask: 'full' });
+  let s = sched.recordAttempt(sched.emptyState(), { type: 'add', params: p, correct: false, tag: 'add_or', group: 'set', today: RD });
+  assert.equal(s.queue[0].group, 'set');
+  assert.equal(s.queue[0].due, RD + 2);
+  s = sched.recordAttempt(s, { type: 'add', params: p, correct: true, today: RD + 2 });
+  assert.equal(s.queue[0].due, RD + 2 + 7);
+  s = sched.recordAttempt(s, { type: 'add', params: p, correct: true, today: RD + 9 });
+  assert.deepEqual(sched.reviewAccuracy(s), { drill: { right: 0, total: 0 }, holdout: { right: 0, total: 0 } });
+  assert.equal(s.queue[0].measured, true);
+  // drill still counts; the group survives a save and reload
+  const d = ITEM_TYPES.add.encodeParams({ w: 8, a: 70, b: 99, ask: 'full' });
+  let t = sched.recordAttempt(s, { type: 'add', params: d, correct: false, tag: 'add_or', group: 'drill', today: RD });
+  t = sched.recordAttempt(t, { type: 'add', params: d, correct: true, today: RD + 8 });
+  assert.deepEqual(sched.reviewAccuracy(t).drill, { right: 1, total: 1 });
+  assert.equal(sched.activeEntries(JSON.parse(JSON.stringify(t))).find((e) => e.key.endsWith(p.join('.'))).group, 'set');
+  assert.deepEqual(Object.keys(sched.reviewAccuracy(t)), ['drill', 'holdout']);
+});
+
+test('starter: missed slots come first; the newest point is never "new" while the class has an open miss on it', () => {
+  const D = 20000;
+  let c = starter.newClass({ id: 'x', level: 'gcse' });
+  c = starter.setTaught(c, 'J277-1.2.4-add', D - 20);
+  c = starter.setTaught(c, 'J277-1.2.4-shift', D - 10);
+  c = starter.recordTap(c, { spec: 'J277-1.2.4-add', tag: 'add_no_carry', result: 'missed', date: D - 3 });
+  c = starter.recordTap(c, { spec: 'J277-1.2.4-shift', result: 'split', date: D - 2 });
+  const plan = starter.buildStarter(c, D, mulberry32(1));
+  assert.equal(plan.length, 5);
+  const missed = plan.filter((e) => e.source === 'missed');
+  assert.deepEqual(missed.map((e) => e.spec).sort(), ['J277-1.2.4-add', 'J277-1.2.4-shift']);
+  assert.ok(!plan.some((e) => e.source === 'new' && e.spec === 'J277-1.2.4-shift'));
+
+  // A-level: the newest point (adders) was missed; 'new' moves to the next-newest
+  let a = starter.newClass({ id: 'y', level: 'alevel' });
+  for (const [s, d] of [['H446-1.4.1-twos', 30], ['H446-1.4.1-arith', 21], ['H446-1.4.1-shift', 14], ['H446-1.4.3-adders', 2]]) a = starter.setTaught(a, s, D - d);
+  a = starter.recordTap(a, { spec: 'H446-1.4.1-twos', tag: 'twos_no_plus1', result: 'missed', date: D - 1 });
+  a = starter.recordTap(a, { spec: 'H446-1.4.1-arith', tag: 'flags_carry_is_overflow', result: 'split', date: D - 1 });
+  a = starter.recordTap(a, { spec: 'H446-1.4.3-adders', result: 'missed', date: D - 1 });
+  const pa = starter.buildStarter(a, D, mulberry32(2));
+  assert.ok(pa.some((e) => e.source === 'missed' && e.spec === 'H446-1.4.3-adders'));
+  assert.ok(!pa.some((e) => e.source === 'new' && e.spec === 'H446-1.4.3-adders'));
+  const nw = pa.find((e) => e.source === 'new');
+  assert.equal(nw.spec, 'H446-1.4.1-shift');
+  assert.ok(nw.note.length <= 80);
+
+  // no taps: the newest point still gets the 'new' slot
+  let b = starter.newClass({ id: 'z', level: 'gcse' });
+  b = starter.setTaught(b, 'J277-1.2.4-add', D - 20);
+  b = starter.setTaught(b, 'J277-1.2.4-shift', D - 10);
+  const pb = starter.buildStarter(b, D, mulberry32(3));
+  assert.equal(pb[4].source, 'new');
+  assert.equal(pb[4].spec, 'J277-1.2.4-shift');
+});
+
+test("result codes and the board never rank 'other' as a misconception", () => {
+  const plan = sets.planSet({ v: 1, level: 'gcse', topics: ['add'], n: 6, seed: 5, mode: 'normal' });
+  const results = [
+    { correct: false, tag: 'other' }, { correct: false, tag: 'other' }, { correct: false, tag: 'other' },
+    { correct: false, tag: 'add_or' }, { correct: false, tag: null }, { correct: true, tag: null },
+  ];
+  const sum = sets.summarizeSet(results, plan, { setId: 5, mode: 'normal' });
+  assert.deepEqual(sum.tags, ['add_or']);
+  // older codes may still carry 'other': it sorts last and is marked
+  const t1 = codec.encodeToken({ setId: 5, mode: 'normal', g1: { right: 1, total: 5 }, g2: { right: 0, total: 1 }, tags: ['other', 'add_or'] });
+  const t2 = codec.encodeToken({ setId: 5, mode: 'normal', g1: { right: 2, total: 5 }, g2: { right: 0, total: 1 }, tags: ['other'] });
+  const t3 = codec.encodeToken({ setId: 5, mode: 'normal', g1: { right: 2, total: 5 }, g2: { right: 1, total: 1 }, tags: ['other', 'add_no_carry'] });
+  const r = board.analyzeTokens([t1, t2, t3].join('\n'));
+  assert.deepEqual(r.tagCounts.map((t) => t.tag), ['add_or', 'add_no_carry', 'other']);   // ties: tag list order
+  assert.equal(r.tagCounts[2].unclassified, true);
+  assert.equal(r.tagCounts[2].count, 3);
+  assert.ok(r.tagCounts.slice(0, 2).every((t) => !t.unclassified));
+});

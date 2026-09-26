@@ -603,3 +603,231 @@ test('decodeParams: damaged links still build a valid item', () => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// Review regressions (requirements #2, #3; bugs #6, #9, #11, #17)
+// ---------------------------------------------------------------------------
+
+test('shift: the value field takes decimals, so the ÷2^k myth on a right shift is diagnosable', () => {
+  const item = shift.build({ w: 8, x: 45, dir: 'R', k: 2, kind: 'logical', askValue: true, level: 'gcse' });
+  const field = item.fields.find((f) => f.id === 'value');
+  assert.equal(field.decimal, true);
+  const ans = { bits: item.key.bits.slice(), value: 11.25 };
+  const m = shift.mark(item, ans);
+  assert.equal(m.cells.value, 'bad');
+  assert.equal(shift.diagnose(item, ans, m).diagnosis.tag, 'shift_value_myth');
+  // a negative arithmetic right shift: −45 ÷ 4 = −11.25, cut to −11; the shift gives −12
+  const neg = shift.build({ w: 8, x: 256 - 45, dir: 'R', k: 2, kind: 'arithmetic', askValue: true, level: 'alevel' });
+  assert.equal(neg.key.value, -12);
+  for (const v of [-11.25, -11]) assert.equal(shift.diagnose(neg, { bits: neg.key.bits.slice(), value: v }).diagnosis.tag, 'shift_value_myth', String(v));
+  // a value that is neither right nor the myth is not tagged as the myth
+  assert.notEqual(shift.diagnose(item, { bits: item.key.bits.slice(), value: 11.5 }).diagnosis.tag, 'shift_value_myth');
+});
+
+test('shift: targeted value-myth items prefer a whole-number myth answer', () => {
+  for (const [level, kind] of [['gcse', 'logical'], ['alevel', 'mixed'], ['alevel', 'arithmetic']]) {
+    const rng = mulberry32(77);
+    let whole = 0;
+    const N = 150;
+    for (let n = 0; n < N; n++) {
+      const p = shift.generate(rng, { level, kind, target: 'shift_value_myth' });
+      const item = shift.build(p);
+      const [myth] = shift.misconceptions(p, 'shift_value_myth');
+      assert.equal(shift.diagnose(item, myth).diagnosis.tag, 'shift_value_myth');
+      if (Number.isInteger(myth.value)) whole++;
+    }
+    assert.ok(whole / N >= 0.95, `${level}/${kind}: ${whole}/${N} whole-number myths`);
+  }
+});
+
+test('shift and twos: an empty answer is called empty, never "the bits you gave are right"', () => {
+  const s = shift.build({ w: 8, x: 45, dir: 'L', k: 1, kind: 'logical', askValue: false });
+  const ds = shift.diagnose(s, shift.blank(s)).diagnosis;
+  assert.equal(ds.tag, null);
+  assert.match(ds.headline, /didn't give/);
+  assert.doesNotMatch(ds.detail, /you gave are right/);
+  assert.match(ds.detail, new RegExp(s.key.bits.slice().reverse().join('')));
+  const t = twos.build({ w: 8, n: -42, task: 'encode' });
+  const dt = twos.diagnose(t, twos.blank(t)).diagnosis;
+  assert.equal(dt.tag, null);
+  assert.match(dt.headline, /didn't give/);
+  assert.doesNotMatch(dt.detail, /you gave are right/);
+  // a partly filled, all-right answer still says so
+  const part = { bits: t.key.bits.map((b, i) => (i < 4 ? b : null)) };
+  assert.match(twos.diagnose(t, part).diagnosis.detail, /you gave are right/);
+});
+
+test('twos: −2^(w−1) is never explained from +2^(w−1)', () => {
+  for (const w of [4, 8, 16]) {
+    const M = 2 ** (w - 1);
+    for (const task of ['encode', 'decode']) {
+      const item = twos.build({ w, n: -M, task });
+      const texts = [];
+      for (const l of twos.why(item, null, { level: 'alevel' })) texts.push(...l.say);
+      const wrongs = task === 'encode'
+        ? [{ bits: bitsOf(M - 1, w) }, { bits: bitsOf(0, w) }, { bits: new Array(w).fill(1) }]
+        : [{ value: M }, { value: 0 }, { value: -(M - 1) }, { value: 5 }];
+      for (const a of wrongs) {
+        const d = twos.diagnose(item, a).diagnosis;
+        texts.push(d.detail);
+        assert.ok(sentenceCount(d.detail) <= 2, d.detail);
+      }
+      for (const t of texts) {
+        assert.doesNotMatch(t, new RegExp(`\\+${M} = `), t);
+        assert.doesNotMatch(t, /start from \+/, t);
+      }
+      assert.ok(texts.some((t) => /smallest/.test(t)));
+    }
+  }
+});
+const sentenceCount = (s) => (s.match(/[.!?](\s|$)/g) || []).length;
+
+test('full adder without wires: feedback never names a wire the learner did not see', () => {
+  for (const [a, b, cin] of [[0, 0, 0], [0, 0, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1], [1, 0, 1], [1, 1, 0], [1, 1, 1]]) {
+    const item = fa.build({ a, b, cin, wires: false, level: 'alevel' });
+    for (const f of item.fields) assert.doesNotMatch(f.label, /\b(x1|a1|a2)\b/, f.label);
+    for (const sum of [null, 0, 1]) {
+      for (const cout of [null, 0, 1]) {
+        const ans = { sum, cout };
+        const m = fa.mark(item, ans);
+        if (m.correct) continue;
+        const d = fa.diagnose(item, ans, m).diagnosis;
+        assert.doesNotMatch(`${d.headline} ${d.detail}`, /\b(x1|a1|a2)\b/, `${a}${b}${cin} ${sum}/${cout}: ${d.detail}`);
+        assert.ok(sentenceCount(d.detail) <= 2, d.detail);
+      }
+    }
+  }
+});
+
+// A learner who writes each carry d columns along (above column i + d, not
+// i + 1) and adds it there — written here independently of add.js.
+function displacedLearner(item, d) {
+  const { w } = item.params;
+  const A = item.show.a;
+  const B = item.show.b;
+  const result = [];
+  const carries = new Array(w + 1).fill(null);
+  const pend = new Array(w + d + 1).fill(0);
+  for (let i = 0; i < w; i++) {
+    const s = A[i] + B[i] + pend[i];
+    result.push(s % 2);
+    if (s >= 2) { pend[i + d] = 1; if (i + d <= w) carries[i + d] = 1; }
+  }
+  return { carries, result: [...result, null], overflow: pend[w] ? 'yes' : 'no' };
+}
+
+test('add: a carry written (and added) one or two columns too far left is "carry in the wrong column"', () => {
+  // The reviewer's case: 150 + 102, each carry two columns along.
+  const item = add.build({ w: 8, a: 150, b: 102, ask: 'full', level: 'gcse' });
+  const ans = displacedLearner(item, 2);
+  assert.deepEqual(ans.carries, [null, null, null, 1, 1, null, 1, null, 1]);
+  const d = add.diagnose(item, ans).diagnosis;
+  assert.equal(d.tag, 'add_carry_wrong_col');
+  assert.equal(d.focus.column, 1);
+  assert.match(d.detail, /2s column/);
+  assert.match(d.detail, /8s column/);
+  assert.ok(sentenceCount(d.detail) <= 2);
+  assert.equal(add.why(item, d, { level: 'gcse' })[1].data.k, 1);
+
+  // simulated students over many items
+  const rng = mulberry32(2024);
+  const hits = { 2: 0, 3: 0 };
+  const tried = { 2: 0, 3: 0 };
+  for (let n = 0; n < 1500; n++) {
+    const it = add.build(add.generate(rng, { w: pick(rng, [6, 8, 8, 12, 16]), ask: 'full' }));
+    for (const dd of [2, 3]) {
+      const a = displacedLearner(it, dd);
+      const m = add.mark(it, a);
+      if (m.correct) continue;
+      tried[dd]++;
+      const dg = add.diagnose(it, a, m).diagnosis;
+      if (dg.tag === 'add_carry_wrong_col') {
+        hits[dd]++;
+        // focus: the lowest column that makes a carry
+        const c = dg.focus.column;
+        assert.equal(add.colRule(it.show.a[c], it.show.b[c], it.sim.carries[c])[1], 1);
+        assert.ok(it.sim.carries.slice(1, c + 1).every((x) => x === 0));
+      } else assert.equal(dg.tag, 'add_no_carry', 'the only other reading is a dropped carry');
+    }
+  }
+  assert.ok(hits[2] / tried[2] >= 0.9, `one column too far: ${hits[2]}/${tried[2]}`);
+  assert.ok(hits[3] / tried[3] >= 0.8, `two columns too far: ${hits[3]}/${tried[3]}`);
+});
+
+test('add: dropped-carry, OR and 1+1+1 learners are never told "carry in the wrong column"', () => {
+  const rng = mulberry32(99);
+  let fired = 0;
+  let total = 0;
+  for (let n = 0; n < 1500; n++) {
+    const it = add.build(add.generate(rng, { w: pick(rng, [4, 6, 8, 12, 16]), ask: 'full' }));
+    const { w } = it.params;
+    const A = it.show.a;
+    const B = it.show.b;
+    const answers = [
+      add.misconceive(it.params, 'add_no_carry', 0), add.misconceive(it.params, 'add_no_carry', 1),
+      add.misconceive(it.params, 'add_or'), add.misconceive(it.params, 'add_three_ones'),
+    ];
+    // one carry dropped (neither written nor added), everything else right
+    const made = it.sim.carries.map((c, j) => (j > 0 && c ? j : 0)).filter(Boolean);
+    const j0 = pick(rng, made);
+    const result = [];
+    const carries = new Array(w + 1).fill(null);
+    let c = 0;
+    for (let i = 0; i < w; i++) {
+      const s = A[i] + B[i] + c;
+      result.push(s % 2);
+      c = i + 1 === j0 ? 0 : s >> 1;
+      carries[i + 1] = c || null;
+    }
+    answers.push({ carries, result: [...result, null], overflow: c ? 'yes' : 'no' });
+    for (const a of answers) {
+      const m = add.mark(it, a);
+      if (m.correct) continue;
+      total++;
+      if (add.diagnose(it, a, m).diagnosis.tag === 'add_carry_wrong_col') fired++;
+    }
+  }
+  assert.ok(fired / total < 0.002, `false alarms ${fired}/${total}`);
+});
+
+test('add: targeted wrong-column items show both the moved carry row and the carried-and-added form', () => {
+  const rng = mulberry32(5);
+  for (let n = 0; n < 60; n++) {
+    const p = add.generate(rng, { w: 8, target: 'add_carry_wrong_col' });
+    const it = add.build(p);
+    for (const v of [0, 1]) assert.equal(add.diagnose(it, add.misconceive(p, 'add_carry_wrong_col', v)).diagnosis.tag, 'add_carry_wrong_col');
+  }
+});
+
+test('carry checkpoints list every carry that counts as right (paper-method subtraction)', () => {
+  const rng = mulberry32(31);
+  let seen = 0;
+  for (let n = 0; n < 400 && seen < 20; n++) {
+    const item = sadd.build(sadd.generate(rng, { level: 'alevel', op: '-' }));
+    const s = item.sim;
+    const { w } = item.params;
+    const i = [...Array(w).keys()].find((j) => j > 0 && s.carries[j] !== s.paperCarries[j]);
+    if (i === undefined) continue;
+    seen++;
+    const bitsAns = s.result.slice();
+    bitsAns[i] = 1 - bitsAns[i];
+    const ans = { bits: bitsAns, flags: {} };
+    const { next } = sadd.diagnose(item, ans, sadd.mark(item, ans), []);
+    assert.equal(next.id, 'carry-in');
+    assert.deepEqual([...next.accept].sort(), [0, 1]);
+    assert.ok(next.accept.includes(next.answer));
+    // either accepted carry moves on to the column question; it is not a dropped carry
+    for (const c of next.accept) {
+      const r = sadd.diagnose(item, ans, sadd.mark(item, ans), [c]);
+      assert.equal(r.next?.id, 'column', `carry ${c}`);
+    }
+  }
+  assert.ok(seen >= 5, `found ${seen} paper-method cases`);
+  // ordinary addition has one right carry: no accept list
+  const it = add.build({ w: 8, a: 150, b: 102, ask: 'result' });
+  const ans = { carries: new Array(9).fill(null), result: [...it.key.result], overflow: it.key.overflow };
+  ans.result[3] = 1 - ans.result[3];
+  const { next } = add.diagnose(it, ans, add.mark(it, ans), []);
+  assert.equal(next.id, 'carry-in');
+  assert.equal('accept' in next, false);
+});

@@ -76,11 +76,15 @@ export function planSet(set, { arm } = {}) {
   return set.mode === 'study' || set.mode === 'delayed' ? planStudy(set, rng, arm) : planNormal(set, rng);
 }
 
-/** the three most frequent misconceptions among first-attempt misses (ties: the one met first) */
+/**
+ * the three most frequent misconceptions among first-attempt misses (ties: the
+ * one met first). 'other' (wrong, but no named misconception) is left out, so it
+ * never takes a slot a real misconception could use.
+ */
 function topTags(results) {
   const counts = new Map();
   results.forEach((r) => {
-    if (r && !r.correct && r.tag) counts.set(r.tag, (counts.get(r.tag) || 0) + 1);
+    if (r && !r.correct && r.tag && r.tag !== 'other') counts.set(r.tag, (counts.get(r.tag) || 0) + 1);
   });
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
 }

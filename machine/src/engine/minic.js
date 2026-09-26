@@ -1012,7 +1012,7 @@ export function compile(src, opts = {}) {
       case 'for': {
         scopes.push(new Map());
         const lBody = newLabel(), lStep = newLabel(), lCond = newLabel(), lEnd = newLabel();
-        if (s.init) genStmt(s.init);
+        if (s.init) { cur.ctl = 'init'; genStmt(s.init); cur.ctl = null; }
         cur.line = s.line; cur.stmt = s;
         jump(null, lCond);
         label(lBody);

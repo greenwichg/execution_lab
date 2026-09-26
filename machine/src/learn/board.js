@@ -141,12 +141,20 @@ function studyBlock(rows) {
   };
 }
 
+/**
+ * Named misconceptions, most listed first. 'other' (from codes made before
+ * sets left it out) always comes last, marked `unclassified: true`: it is not
+ * a misconception, so the board shows it as a plain count.
+ */
 function tagCountsOf(rows) {
   const counts = new Map();
-  for (const r of rows) for (const t of new Set(r.tags)) counts.set(t, (counts.get(t) || 0) + 1);
+  for (const r of rows) for (const t of new Set(r.tags)) if (t) counts.set(t, (counts.get(t) || 0) + 1);
   return [...counts.entries()]
-    .map(([tag, count]) => ({ tag, index: tagIndex(tag), label: tagLabel(tag), count, of: rows.length }))
-    .sort((a, b) => (b.count - a.count) || (a.index - b.index));
+    .map(([tag, count]) => {
+      const row = { tag, index: tagIndex(tag), label: tagLabel(tag), count, of: rows.length };
+      return tag === 'other' ? { ...row, unclassified: true } : row;
+    })
+    .sort((a, b) => (!!a.unclassified - !!b.unclassified) || (b.count - a.count) || (a.index - b.index));
 }
 
 /**
