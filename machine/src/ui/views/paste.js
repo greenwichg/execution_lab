@@ -4,7 +4,8 @@
 // machine part ways, then the diagnosis and the Why rail for that statement.
 import { h, announce, focus, shareUrl } from '../../lib/dom.js';
 import { load, save } from '../../lib/store.js';
-import { LIMITS } from '../../engine/minic.js';
+import { LIMITS, compile } from '../../engine/minic.js';
+import { hashStr } from '../../lib/rng.js';
 import { analyzePaste, markOutput, diagnosePaste, whyPaste, normOutput } from '../../learn/paste.js';
 import { TAGS } from '../../learn/catalogue.js';
 import { button, confidence, callout, copyBox, statusGlyph } from '../parts.js';
@@ -35,8 +36,17 @@ export function encodeCode(code) {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/** base64url → code, or null for anything malformed (the link is untrusted) */
-export function decodeCode(text) {
+/** a short check on the code a link carries, so a link cut short or changed is refused, not half-loaded */
+export const codeCheck = (code) => hashStr(String(code)).toString(36);
+
+/** the share path for a program: the check comes first, so cutting the link short can't remove it */
+export const sharePath = (code) => `/paste?k=${codeCheck(code)}&code=${encodeCode(code)}`;
+
+/**
+ * base64url → code, or null for anything malformed (the link is untrusted).
+ * With `check` (the link's k=), the code must match it.
+ */
+export function decodeCode(text, check = null) {
   try {
     const t = String(text ?? '').trim();
     if (!t || t.length > SHARE_MAX || !/^[A-Za-z0-9_-]+$/.test(t) || t.length % 4 === 1) return null;
@@ -45,8 +55,10 @@ export function decodeCode(text) {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const code = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    // keep printable text, tabs and newlines only
-    return code.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '');
+    if (check !== null && codeCheck(code) !== String(check)) return null;
+    // keep printable text, tabs and newlines only; drop bidi controls, which can make
+    // code read differently from how it runs
+    return code.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g, '');
   } catch { return null; }
 }
 
@@ -55,16 +67,22 @@ export function render(el, ctx) {
   let notice = null;
   let code = null;
   const fromLink = ctx.query.get('code');
+  const saved0 = load(CODE_KEY, null);
+  const saved = typeof saved0 === 'string' && saved0.length <= 20000 ? saved0 : null;
+  let restore = null;
   if (fromLink !== null) {
-    code = decodeCode(fromLink);
-    notice = code === null
-      ? callout('bad', "That share link didn't work.", 'It may have been cut short when it was copied. Your own code is below.')
-      : callout(null, null, 'Loaded the program from your link. It stays on this device.');
+    code = decodeCode(fromLink, ctx.query.get('k'));
+    if (code === null) {
+      notice = callout('bad', "That share link didn't work.", 'It may have been cut short or changed when it was copied. Ask for the link again. Your own code is below.');
+    } else {
+      notice = callout(null, null, 'Loaded the program from your link. It stays on this device.');
+      if (saved !== null && saved !== code) {
+        restore = button('Load my own program instead', { small: true });
+        notice.append(h('p', { class: 'callout-body' }, restore));
+      }
+    }
   }
-  if (code === null) {
-    const saved = load(CODE_KEY, null);
-    code = typeof saved === 'string' && saved.length <= 20000 ? saved : EXAMPLES[0].code;
-  }
+  if (code === null) code = saved ?? EXAMPLES[0].code;
 
   // ------------------------------------------------------------ editor
   const gutter = h('div', { class: 'pe-gutter', 'aria-hidden': 'true' });
@@ -75,6 +93,8 @@ export function render(el, ctx) {
   ta.value = code;
   const count = h('p', { id: 'pe-count', class: 'pe-count small muted', 'aria-live': 'polite' });
   const editor = h('div', { class: 'pe' }, gutter, ta);
+  const undoRow = h('p', { class: 'pe-undo small', role: 'status' });
+  let before = null;              // the learner's own code, while an example has replaced it
   let errLine = null;
   let escaped = false;
 
@@ -106,9 +126,10 @@ export function render(el, ctx) {
           h('label', { for: 'pe-code', class: 'field-label' }, 'Your C program'),
           examples),
         editor,
+        undoRow,
         count,
         h('p', { id: 'pe-help', class: 'small muted' },
-          `Up to ${LIMITS.lines} lines of ${LIMITS.cols} characters. Whole-number types (char, short, int, long, signed or unsigned), arithmetic, bitwise and shift operators, comparisons, if, else, while, for, break, continue and printf with %d %u %x %o %c. Everything runs inside main; no arrays, pointers or other functions. Tab indents; press Esc then Tab to leave the editor.`)),
+          `Up to ${LIMITS.lines} lines of ${LIMITS.cols} characters. Whole-number types (char, short, int, long, signed or unsigned), arithmetic, bitwise and shift operators, comparisons, if, else, while, for, break, continue and printf with %d %i %u %x %X %o %c (and sizes such as %ld or %hhu). Everything runs inside main; no arrays, pointers, strings or other functions. Tab indents; press Esc then Tab to leave the editor.`)),
       h('div', { class: 'paste-col stack-sm' },
         h('label', { for: 'pe-predict', class: 'field-label' }, 'What will it print?'),
         predict,
@@ -132,16 +153,20 @@ export function render(el, ctx) {
     }
     gutter.replaceChildren(h('div', { class: 'pe-gutter-inner' }, rows));
     gutter.scrollTop = ta.scrollTop;
-    const long = ta.value.split('\n').map((l, i) => ({ i: i + 1, len: l.length })).filter((x) => x.len > LIMITS.cols);
-    const parts = [`${n} of ${LIMITS.lines} lines.`];
-    if (n > LIMITS.lines) parts.push(`That is ${n - LIMITS.lines} too many.`);
+    const all = ta.value.split('\n');
+    while (all.length && !all[all.length - 1].trim()) all.pop();       // blank lines at the end don't count
+    const used = all.length;
+    const long = all.map((l, i) => ({ i: i + 1, len: l.length })).filter((x) => x.len > LIMITS.cols);
+    const parts = [`${used} of ${LIMITS.lines} lines.`];
+    if (used > LIMITS.lines) parts.push(`That is ${used - LIMITS.lines} too many.`);
     if (long.length) parts.push(`Line ${long[0].i} is ${long[0].len} characters; the limit is ${LIMITS.cols}.`);
     count.textContent = parts.join(' ');
-    count.classList.toggle('over', n > LIMITS.lines || long.length > 0);
+    count.classList.toggle('over', used > LIMITS.lines || long.length > 0);
   }
   ta.addEventListener('input', () => {
     errLine = null;
     examples.value = '';
+    if (undoRow.firstChild) { undoRow.replaceChildren(); before = null; }
     drawGutter();
     save(CODE_KEY, ta.value);
   });
@@ -162,16 +187,42 @@ export function render(el, ctx) {
   predict.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runIt(); }
   });
+  // loading an example replaces the editor, so keep the learner's own code one click away
+  // (arrow keys on a closed select change it straight away on Windows and ChromeOS)
   examples.addEventListener('change', () => {
     const ex = EXAMPLES[Number(examples.value)];
     if (!ex || ta.readOnly) return;
+    const mine = ta.value;
+    if (before === null && mine.trim() && !EXAMPLES.some((e) => e.code === mine)) before = mine;
     ta.value = ex.code;
     errLine = null;
     drawGutter();
     save(CODE_KEY, ta.value);
     result.replaceChildren();
     shareHolder.replaceChildren();
+    undoRow.replaceChildren(`Loaded the example “${ex.title}”.`,
+      ...(before !== null ? [button('Put my own code back', { small: true, kind: 'ghost', onClick: putBack })] : []));
     announce(`Loaded the example: ${ex.title}.`);
+  });
+  function putBack() {
+    if (before === null || ta.readOnly) return;
+    ta.value = before;
+    before = null;
+    examples.value = '';
+    errLine = null;
+    drawGutter();
+    save(CODE_KEY, ta.value);
+    undoRow.replaceChildren('Your own code is back.');
+    ta.focus();
+  }
+  restore?.addEventListener('click', () => {
+    if (ta.readOnly) return;
+    ta.value = saved;
+    errLine = null;
+    drawGutter();
+    restore.closest('.callout')?.remove();
+    announce('Loaded your own program.');
+    ta.focus();
   });
   drawGutter();
 
@@ -179,7 +230,7 @@ export function render(el, ctx) {
     const enc = encodeCode(ta.value);
     shareHolder.replaceChildren(enc.length > SHARE_MAX
       ? h('p', { class: 'small' }, 'This program is too long to fit in a share link.')
-      : copyBox(shareUrl(`/paste?code=${enc}`), { what: 'Share link copied' }));
+      : copyBox(shareUrl(sharePath(ta.value)), { what: 'Share link copied' }));
   }
 
   // ------------------------------------------------------------ run and check
@@ -204,8 +255,15 @@ export function render(el, ctx) {
       return;
     }
     hint.textContent = '';
+    if (!src.trim()) {
+      hint.textContent = 'There is no program to run yet. Type some C, or load an example.';
+      ta.focus();
+      return;
+    }
+    // compile first, so an error can say whether the compiler or the running program stopped
+    try { compile(src); } catch (e) { return showError(e, 'compile'); }
     let analysis;
-    try { analysis = analyzePaste(src); } catch (e) { return showError(e); }
+    try { analysis = analyzePaste(src); } catch (e) { return showError(e, 'run'); }
     errLine = null;
     drawGutter();
     lock(true);
@@ -216,13 +274,18 @@ export function render(el, ctx) {
     showWrong(analysis, predicted, m);
   }
 
-  function showError(e) {
+  function showError(e, stage = 'compile') {
     const line = Number.isInteger(e?.line) && e.line > 0 ? e.line : null;
     const col = Number.isInteger(e?.col) && e.col > 0 ? e.col : null;
-    const where = line ? ` at line ${line}${col ? `, column ${col}` : ''}` : '';
-    const isC = e && e.name === 'CError';
-    const head = !isC ? "This program couldn't be run." : e.kind === 'runtime' ? `Runtime error${where}.` : `Compile error${where}.`;
-    const msg = isC ? `${e.message}.`.replace(/\.\.$/, '.') : 'The compiler stopped unexpectedly. Try a smaller program.';
+    const isC = !!e && e.name === 'CError';
+    const running = stage === 'run';
+    const where = line ? ` at line ${line}${col && !running ? `, column ${col}` : ''}` : '';
+    const head = !isC ? "This program couldn't be run."
+      : e.kind === 'runtime' ? `Runtime error${where}.`
+        : running ? `The program was stopped${line ? ` at line ${line}` : ''}.`
+          : e.kind === 'limit' ? `Too big for this lab${where}.` : `Compile error${where}.`;
+    const text = String(e?.message || '').trim();
+    const msg = isC && text ? (/[.?!]$/.test(text) ? text : `${text}.`) : 'The compiler stopped unexpectedly. Try a smaller program.';
     errLine = line;
     drawGutter();
     const box = callout('bad', head, msg);
@@ -288,19 +351,33 @@ export function render(el, ctx) {
       box.append(h('div', { class: 'row' }, input.el, go, skip));
       result.append(box);
       let answered = false;
-      const submit = (v) => {
+      const cpHint = h('p', { class: 'small muted cp-hint', role: 'status' });
+      box.append(cpHint);
+      const submit = (v, fromAnswer) => {
         if (answered) return;
+        // Answer with nothing readable is not "Not sure": say what is needed instead
+        if (fromAnswer && v === null) {
+          const typed = input.el.tagName === 'INPUT' && input.el.value.trim() !== '';
+          cpHint.textContent = typed ? 'Type a whole number in denary, such as -13, or choose Not sure.' : 'Type a number first, or choose Not sure.';
+          input.focus();
+          return;
+        }
         answered = true;
+        cpHint.remove();
+        if (v === null && input.el.tagName === 'INPUT') input.el.value = '';
         go.disabled = true; skip.disabled = true; input.disable();
         const right = v !== null && sameValue(v, cp.answer);
-        box.append(h('p', { class: ['small', 'cp-result', right ? 'ok' : 'bad'] }, statusGlyph(right ? 'ok' : 'bad'), ' ',
-          v === null ? `It's ${String(cp.answer)}.` : right ? 'Right.' : `Not quite — it's ${String(cp.answer)}.`));
+        // "Not sure" is not a wrong answer: no ✗, just the value
+        box.append(v === null
+          ? h('p', { class: 'small muted cp-result' }, `The answer is ${String(cp.answer)}.`)
+          : h('p', { class: ['small', 'cp-result', right ? 'ok' : 'bad'] }, statusGlyph(right ? 'ok' : 'bad'), ' ',
+            right ? 'Right.' : `Not quite — it's ${String(cp.answer)}.`));
         cps.push(v);
         step();
       };
-      go.addEventListener('click', () => submit(value));
+      go.addEventListener('click', () => submit(value, true));
       skip.addEventListener('click', () => submit(null));
-      if (input.el.tagName === 'INPUT') input.el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(value); } });
+      if (input.el.tagName === 'INPUT') input.el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(value, true); } });
       input.focus();
     };
     const diagnose = (d) => {
@@ -361,8 +438,14 @@ function outputBlock(label, text, { statuses = null, first = -1, glyphs = false 
 }
 
 function compare(predicted, output, statuses, first) {
-  return h('div', { class: 'compare' },
+  const el = h('div', { class: 'compare' },
     outputBlock('You predicted', predicted, { statuses, first, glyphs: true }),
     outputBlock('The machine printed', output, { statuses, first }),
     h('p', { class: 'small muted compare-note' }, h('span', { 'aria-hidden': 'true' }, '▸ '), 'marks the first line that differs.'));
+  // long output scrolls inside its box: bring the first difference into view there
+  requestAnimationFrame(() => el.querySelectorAll('.out-pre').forEach((pre) => {
+    const fd = pre.querySelector('.first-diff');
+    if (fd && pre.scrollHeight > pre.clientHeight) pre.scrollTop = Math.max(0, fd.offsetTop - pre.clientHeight / 3);
+  }));
+  return el;
 }

@@ -11,6 +11,7 @@ import { chip } from '../parts.js';
 import { mountItem } from '../runner.js';
 import { loadSched, saveSched } from '../session.js';
 import { highlightC, stdChip } from '../code.js';
+import { load, save } from '../../lib/store.js';
 import { setNav } from '../nav.js';
 
 let runner = null;
@@ -26,8 +27,30 @@ function commit(tag) {
       tag: (tag !== undefined ? tag : p.tag) || undefined, group: 'drill', today: sched.dayNumber(new Date()),
     });
     saveSched(state);
+    // the card list reveals a card's C-standard status only once it has been tried
+    const tried = load('cards.tried', []);
+    if (Array.isArray(tried) && !tried.includes(p.params.id)) save('cards.tried', [...tried, p.params.id].slice(-50));
   } catch (e) { console.error(e); }
 }
+
+// Card titles name the canonical numbers ("Storing 70000 in a short"); a variant
+// uses new numbers, so its heading must not promise the old ones.
+const VARIANT_TITLES = {
+  'char-200': 'A char that holds a big number',
+  'minus-one-vs-unsigned': 'Comparing a negative int with an unsigned',
+  'uchar-promotion': 'Adding two unsigned chars',
+  'short-truncation': 'Storing a big int in a short',
+  'unsigned-wrap': 'An unsigned value that goes below zero',
+  'int-max-plus-one': 'An int that goes past INT_MAX',
+  'int-multiply-overflow': 'A product too big for an int',
+  'negative-shift-right': 'Shifting a negative int right',
+  'truncating-division': 'Dividing with negative numbers',
+  'unsigned-shift-right': 'Shifting an unsigned value right',
+  'signed-unsigned-branch': 'Which branch runs?',
+  'flags-after-cmp': 'The flags after cmp',
+};
+/** the heading for a card instance: the canonical title, or a number-free one for a variant */
+export const titleFor = (card, v) => (v ? VARIANT_TITLES[card.id] || `A variant of “${card.title}”` : card.title);
 
 /** '?v=' → 0 … V_MAX (anything else is the canonical card) */
 function variantOf(query) {
@@ -76,7 +99,8 @@ export function render(el, ctx) {
         next ? h('a', { href: href(`/card/${next.id}`), rel: 'next', 'aria-label': `Next card: ${next.title}` }, 'Next ›') : null)),
     h('div', { class: 'stack-sm' },
       h('div', { class: 'row' }, chip(card.section, 'accent'), v ? chip(`Variant ${v}`) : null),
-      h('h1', null, card.title)),
+      h('h1', null, titleFor(card, v)),
+      v ? h('p', { class: 'small muted card-variant-note' }, 'New numbers, same idea as ', h('a', { href: href(`/card/${card.id}`) }, `“${card.title}”`), '.') : null),
     holder,
     h('p', { class: 'small muted' }, "Computed by this lab's C compiler and x86-64 emulator. Nothing you type leaves this device."));
   el.append(main);

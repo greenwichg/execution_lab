@@ -2,7 +2,7 @@
 // so everyone gets the same set; the learner's answers stay on this device.
 // At the end a short result code carries the first-attempt scores (and, for
 // study sets, the randomly assigned group) back to the teacher by paste.
-import { h, href, announce, focus } from '../../lib/dom.js';
+import { h, href, announce, focus, replace } from '../../lib/dom.js';
 import { load, save } from '../../lib/store.js';
 import { mulberry32, newSeed } from '../../lib/rng.js';
 import { decodeSet, encodeToken, ARM_UNKNOWN } from '../../lib/codec.js';
@@ -17,6 +17,7 @@ import { setNav } from '../nav.js';
 
 let runner = null;
 let flush = null;
+let onHide = null;
 
 const validArm = (a) => a === 0 || a === 1;
 
@@ -67,7 +68,7 @@ export function render(el, ctx) {
     const minutes = Math.max(5, Math.round(n * 1.5));
     const recover = mode === 'delayed' && arm === ARM_UNKNOWN && set.link !== null && done === 0 ? recoverBox() : null;
     const start = button(done > 0 ? `Carry on from question ${done + 1}` : 'Start', { kind: 'primary', onClick: () => ask(done) });
-    stage.replaceChildren(
+    replace(stage,
       h('div', { class: 'row' }, tile(n, n === 1 ? 'question' : 'questions'), tile(`~${minutes}`, 'minutes')),
       h('p', { class: 'lede' }, 'When you finish you\'ll get a result code to paste into your assignment. Your answers stay on this device.'),
       done > 0 ? h('p', null, `You've answered ${done} of ${n}. You can carry on where you left off.`) : null,
@@ -93,7 +94,9 @@ export function render(el, ctx) {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); use.click(); } });
     const box = h('section', { class: 'panel tight stack-sm hs-recover', 'aria-labelledby': 'hs-recover-h' },
       h('h2', { id: 'hs-recover-h', class: 'hs-small-h' }, 'Did last week\'s set on another device?'),
-      h('label', { class: 'field', for: 'hs-recover' }, h('span', { class: 'hint' }, 'Paste its result code (optional). You can skip this.'), h('span', { class: 'row' }, input, use)),
+      h('div', { class: 'field' },
+        h('label', { class: 'hint', for: 'hs-recover' }, 'Paste its result code (optional). You can skip this.'),
+        h('div', { class: 'row' }, input, use)),
       msg);
     return box;
   }
@@ -114,6 +117,10 @@ export function render(el, ctx) {
     } catch (e) { console.error(e); }
   }
   flush = () => commit();
+  // a reload or a closed tab after Check (before Next) must still send the miss to the review queue
+  if (onHide) removeEventListener('pagehide', onHide);
+  onHide = () => commit();
+  addEventListener('pagehide', onHide);
 
   function ask(i) {
     runner?.destroy();
@@ -179,9 +186,14 @@ export function render(el, ctx) {
     announce(`Set complete. ${right} of ${total} right first time. Your result code is on the screen.`);
   }
 
-  if (prog.token && firstOpen() >= plan.length) finish();
+  // every question answered (even if the page closed before the code was shown): straight to the code
+  if (firstOpen() >= plan.length) finish();
   else intro();
 }
 
-export function dispose() { flush?.(); flush = null; runner?.destroy(); runner = null; }
+export function dispose() {
+  flush?.(); flush = null;
+  if (onHide) { removeEventListener('pagehide', onHide); onHide = null; }
+  runner?.destroy(); runner = null;
+}
 

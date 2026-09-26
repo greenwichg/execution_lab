@@ -13,6 +13,9 @@ import { renderWhy, renderLayer } from './why.js';
 const FLAG_NAMES = ['CF', 'ZF', 'SF', 'OF'];
 const LONG_FLAG = { CF: 'Carry flag (CF)', ZF: 'Zero flag (ZF)', SF: 'Sign flag (SF)', OF: 'Overflow flag (OF)' };
 const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+// only plain yes/no answers get a capital: C type names, instructions (jae) and printed
+// messages ("not less") must appear exactly as the machine spells them
+const choiceLabel = (c) => (c === 'yes' || c === 'no' ? cap(c) : String(c));
 const firstSentence = (s) => { const m = String(s || '').match(/^.*?[.!?](\s|$)/); return m ? m[0].trim() : String(s || ''); };
 
 export function moduleFor(item) {
@@ -127,20 +130,36 @@ export function mountItem(el, item, opts = {}) {
     const go = button('Answer', { kind: 'primary', small: true });
     const skip = button('Not sure', { small: true, kind: 'ghost' });
     const row = h('div', { class: 'row' }, input.el, go, skip);
-    box.append(row);
+    const cpHint = h('p', { class: 'small muted cp-hint', role: 'status' });
+    box.append(row, cpHint);
     feedbackEl.append(box);
-    const submit = (v) => {
+    let answered = false;
+    const submit = (v, fromAnswer) => {
+      if (answered) return;
+      // Answer with nothing readable is not "Not sure": say what is needed instead
+      if (fromAnswer && v === null) {
+        const typed = input.el.tagName === 'INPUT' && input.el.value.trim() !== '';
+        cpHint.textContent = typed ? 'Type a whole number in denary, such as -56, or choose Not sure.' : 'Give an answer first, or choose Not sure.';
+        return;
+      }
+      answered = true;
+      cpHint.remove();
+      if (v === null && input.el.tagName === 'INPUT') input.el.value = '';
       go.disabled = true; skip.disabled = true; input.disable();
       const right = sameValue(v, cp.answer);
-      box.append(h('p', { class: ['small', right ? 'ok' : 'bad'] }, statusGlyph(right ? 'ok' : 'bad'), ' ',
-        v === null ? `It's ${showValue(cp.answer, cp.input)}.` : right ? 'Right.' : `Not quite — it's ${showValue(cp.answer, cp.input)}.`));
+      // "Not sure" is not a wrong answer: no ✗, just the value
+      box.append(v === null
+        ? h('p', { class: 'small muted cp-result' }, `The answer is ${showValue(cp.answer, cp.input)}.`)
+        : h('p', { class: ['small', 'cp-result', right ? 'ok' : 'bad'] }, statusGlyph(right ? 'ok' : 'bad'), ' ',
+          right ? 'Right.' : `Not quite — it's ${showValue(cp.answer, cp.input)}.`));
       cps.push(v);
       let res = { next: null, diagnosis: null };
       try { res = mod.diagnose(item, answer, marking, cps) || res; } catch (e) { console.error(e); }
       step(res);
     };
-    go.addEventListener('click', () => submit(value));
+    go.addEventListener('click', () => submit(value, true));
     skip.addEventListener('click', () => submit(null));
+    if (input.el.tagName === 'INPUT') input.el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(value, true); } });
     input.focus();
   }
 
@@ -172,7 +191,9 @@ export function mountItem(el, item, opts = {}) {
   }
 
   function focusFeedback() {
-    const target = feedbackEl.querySelector('.callout, .neutral-line, .checkpoint input, .checkpoint button');
+    // the newest callout (the diagnosis comes after any answered checkpoints)
+    const target = [...feedbackEl.querySelectorAll('.callout, .neutral-line')].pop()
+      || feedbackEl.querySelector('.checkpoint input:not([readonly]), .checkpoint button:not(:disabled)');
     if (target && target.matches('.callout, .neutral-line')) { target.setAttribute('tabindex', '-1'); focus(target); }
     else focus(target);
   }
@@ -248,12 +269,12 @@ function fieldControl(f, item, answer) {
   }
   if (f.kind === 'choice' || f.kind === 'bit') {
     const choices = f.kind === 'bit' ? [0, 1] : f.choices;
-    const s = seg(choices.map((c) => ({ value: c, label: typeof c === 'string' ? cap(c) : String(c) })), { label: f.label, value: answer[f.id], onChange: (v) => { answer[f.id] = v; } });
+    const s = seg(choices.map((c) => ({ value: c, label: choiceLabel(c) })), { label: f.label, value: answer[f.id], onChange: (v) => { answer[f.id] = v; } });
     const note = h('span', { class: 'field-note' });
     const el = h('div', { class: 'field field-choice row' }, label, s.el, note);
     return {
       el, focus: () => s.el.querySelector('button')?.focus(),
-      lock(st, key) { s.setDisabled(true); markNote(note, st, key, (k) => (typeof k === 'string' ? cap(k) : String(k))); },
+      lock(st, key) { s.setDisabled(true); markNote(note, st, key, choiceLabel); },
     };
   }
   if (f.kind === 'flags') {
@@ -305,7 +326,7 @@ export function checkpointInput(cp, onChange) {
   const kind = cp.input?.kind;
   if (kind === 'bit' || kind === 'choice') {
     const choices = kind === 'bit' ? [0, 1] : cp.input.choices;
-    const s = seg(choices.map((c) => ({ value: c, label: typeof c === 'string' ? cap(c) : String(c) })), { label: cp.prompt, onChange });
+    const s = seg(choices.map((c) => ({ value: c, label: choiceLabel(c) })), { label: cp.prompt, onChange });
     return { el: s.el, focus: () => s.el.querySelector('button')?.focus(), disable: () => s.setDisabled(true) };
   }
   if (kind === 'bits') {
@@ -335,7 +356,7 @@ export function sameValue(a, b) {
 }
 function showValue(v, input) {
   if (Array.isArray(v)) return v.slice().reverse().join('');
-  if (input?.kind === 'choice' && typeof v === 'string') return cap(v);
+  if (input?.kind === 'choice' && typeof v === 'string') return choiceLabel(v);
   return String(v);
 }
 

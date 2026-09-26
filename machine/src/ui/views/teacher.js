@@ -39,6 +39,14 @@ export function classSpecs(level) {
 export const today = () => dayNumber(new Date());
 /** the same starter plan all day for a class (preview and projector agree) */
 export const starterRng = (cls, day) => mulberry32(mixSeed('starter', cls.id, day));
+/**
+ * the class as it was when the day began. Taps made during today's starter
+ * feed tomorrow's plan; they must not reshuffle today's questions when the
+ * teacher reloads the projector or looks at the preview again.
+ */
+export const startOfDay = (cls, day) => ({ ...cls, taps: (Array.isArray(cls.taps) ? cls.taps : []).filter((t) => t && Number.isInteger(t.day) && t.day < day) });
+/** today's five-question plan for a class (preview and projector) */
+export const starterPlan = (cls, day) => buildStarter(startOfDay(cls, day), day, starterRng(cls, day));
 
 const SOURCE_TEXT = { missed: 'Missed last time', new: 'New' };
 function agoText(days) {
@@ -117,7 +125,13 @@ export function render(el, ctx) {
   el.append(main);
 
   // ---------------------------------------------------------------- classes
+  let drawing = false;
   function drawClasses(focusSel) {
+    if (drawing) return;
+    drawing = true;
+    try { drawClassesNow(focusSel); } finally { drawing = false; }
+  }
+  function drawClassesNow(focusSel) {
     classes = loadClasses();
     const select = h('select', { id: 'tc-class', 'aria-label': 'Class' },
       classes.map((c) => h('option', { value: c.id, selected: c.id === cls.id }, c.name || 'Unnamed class')));
@@ -125,6 +139,7 @@ export function render(el, ctx) {
     const name = h('input', { type: 'text', id: 'tc-name', value: cls.name, maxlength: '40', autocomplete: 'off' });
     name.addEventListener('change', () => {
       const v = name.value.trim().slice(0, 40) || 'Unnamed class';
+      if (drawing || v === cls.name) return;
       cls = saveClass({ ...cls, name: v });
       announce(`Renamed to ${v}.`);
       drawClasses('#tc-name');
@@ -200,7 +215,7 @@ export function render(el, ctx) {
   function drawStarter() {
     const day = today();
     let plan = [];
-    try { plan = buildStarter(cls, day, starterRng(cls, day)); } catch (e) { console.error(e); }
+    try { plan = starterPlan(cls, day); } catch (e) { console.error(e); }
     starterBox.replaceChildren(
       h('div', { class: 'row spread' },
         h('h2', { id: 'tc-starter' }, "Today's starter"),
@@ -213,7 +228,7 @@ export function render(el, ctx) {
         : h('p', null, 'Tick at least one spec point to plan a starter.'),
       h('div', { class: 'row' },
         h('a', { class: 'btn primary', href: href(`/starter?class=${encodeURIComponent(cls.id)}`) }, 'Project starter'),
-        h('span', { class: 'small muted' }, 'Full screen, one question at a time. Keys: Space reveals, 1 · 2 · 3 record how the class did.')));
+        h('span', { class: 'small muted' }, 'Full screen, one question at a time. Keys: Space reveals, 1 · 2 · 3 record how the class did, W explains, → next, Esc leaves.')));
   }
 
   // ---------------------------------------------------------------- set homework

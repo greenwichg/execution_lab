@@ -2,7 +2,7 @@
 // wrong (with a worked example to project), every row, the lines that were
 // not codes, and the crossover study's reading. The pasted text is kept in
 // memory only; everything stays on this device.
-import { h, href, announce, download, focus } from '../../lib/dom.js';
+import { h, href, announce, download, focus, replace } from '../../lib/dom.js';
 import { mulberry32, newSeed } from '../../lib/rng.js';
 import { analyzeTokens, toCsv } from '../../learn/board.js';
 import { TAGS, tagLabel } from '../../learn/catalogue.js';
@@ -13,10 +13,17 @@ import { codeFromText } from './teacher.js';
 
 const MODE_TEXT = { normal: 'Normal', study: 'Study', delayed: 'Delayed' };
 const pct = (x) => (x === null || x === undefined || !Number.isFinite(x) ? '—' : `${Math.round(x * 100)}%`);
-const pts = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x * 100))}`;
+const pts = (x) => { const r = Math.round(x * 100); return r === 0 ? '0' : `${r > 0 ? '+' : '−'}${Math.abs(r)}`; };
 const fix2 = (x) => (x === null || x === undefined || !Number.isFinite(x) ? '—' : (x < 0 ? `−${Math.abs(x).toFixed(2)}` : x.toFixed(2)));
 
 let overlay = null;
+// a whole year's export pasted at once must not freeze a Chromebook: tables show
+// this many rows, and the CSV always has every row
+const SHOW_MAX = 300;
+const ARM_TEXT = { 0: 'A (arm 0)', 1: 'B (arm 1)', 2: 'unknown' };
+function capNote(shown, all) {
+  return all > shown ? h('p', { class: 'small muted bd-cap' }, `Showing the first ${shown} of ${all}. Download the CSV to see them all.`) : null;
+}
 
 export function render(el, ctx) {
   setNav('#/teacher');
@@ -57,7 +64,7 @@ export function render(el, ctx) {
     const c = r.completion;
     const found = r.rows.length + r.invalid.length;
     const heading = h('h2', { id: 'bd-res-h', tabindex: '-1' }, 'Results');
-    results.replaceChildren(
+    replace(results,
       h('section', { class: 'stack', 'aria-labelledby': 'bd-res-h' },
         heading,
         r.setError ? callout('bad', 'That set link did not work, so every set is counted.', r.setError) : null,
@@ -102,23 +109,25 @@ function tagsSection(r) {
 // ---------------------------------------------------------------- rows
 function rowsSection(r) {
   const study = r.rows.some((x) => x.mode !== 'normal');
+  const shown = r.rows.slice(0, SHOW_MAX);
   return h('section', { class: 'stack-sm', 'aria-labelledby': 'bd-rows-h' },
     h('h2', { id: 'bd-rows-h' }, 'Every code'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'table bd-rows' },
       h('thead', null, h('tr', null,
         h('th', null, 'Line'), h('th', null, 'Code'), h('th', null, 'Set'), h('th', null, 'Score'),
         h('th', null, study ? 'A · B' : 'Drill · Holdout'),
-        study ? h('th', null, 'Group') : null,
+        study ? h('th', null, 'Full feedback on') : null,
         h('th', null, 'Misconceptions'), h('th', null, 'Note'))),
-      h('tbody', null, r.rows.map((x) => h('tr', null,
+      h('tbody', null, shown.map((x) => h('tr', null,
         h('td', null, String(x.line)),
         h('td', { class: 'mono' }, x.code),
         h('td', { class: 'mono' }, `${x.setId}${x.mode !== 'normal' ? ` ${MODE_TEXT[x.mode]}` : ''}`),
         h('td', null, x.total ? `${x.right}/${x.total} (${pct(x.score)})` : '—'),
         h('td', { class: 'mono' }, `${x.g1.right}/${x.g1.total} · ${x.g2.right}/${x.g2.total}`),
-        study ? h('td', null, x.arm === 0 ? '1' : x.arm === 1 ? '2' : x.arm === 2 ? 'unknown' : '—') : null,
+        study ? h('td', null, ARM_TEXT[x.arm] || '—') : null,
         h('td', null, x.tags.length ? x.tags.map(tagLabel).join('; ') : '—'),
-        h('td', { class: 'small' }, x.dupOf !== null ? `Same as line ${x.dupOf}` : '')))))));
+        h('td', { class: 'small' }, x.dupOf !== null ? `Same as line ${x.dupOf}` : '')))))),
+    capNote(shown.length, r.rows.length));
 }
 
 function invalidSection(r) {
@@ -126,8 +135,9 @@ function invalidSection(r) {
     h('h2', { id: 'bd-bad-h' }, `Not counted (${r.invalid.length})`),
     h('div', { class: 'table-wrap' }, h('table', { class: 'table bd-invalid' },
       h('thead', null, h('tr', null, h('th', null, 'Line'), h('th', null, 'What was pasted'), h('th', null, 'Why'))),
-      h('tbody', null, r.invalid.map((x) => h('tr', null,
-        h('td', null, String(x.line)), h('td', { class: 'mono bd-cut' }, x.text), h('td', null, x.error)))))),
+      h('tbody', null, r.invalid.slice(0, SHOW_MAX).map((x) => h('tr', null,
+        h('td', null, String(x.line)), h('td', { class: 'mono bd-cut', title: x.text }, x.text), h('td', null, x.error)))))),
+    capNote(Math.min(SHOW_MAX, r.invalid.length), r.invalid.length),
     h('p', { class: 'small muted' }, 'Ask these learners to copy their code again: every code has a check, so a typo is never counted as someone else\'s result.'));
 }
 
@@ -135,9 +145,9 @@ function invalidSection(r) {
 function studySection(s) {
   return h('section', { class: 'panel stack bd-study', 'aria-labelledby': 'bd-study-h' },
     h('h2', { id: 'bd-study-h' }, 'Study: full feedback vs answer only'),
-    h('p', { class: 'small' }, 'Group 1 got full feedback on addition (A) and only the answer on shifts (B); group 2 the other way round. Groups were assigned at random.'),
-    s.study ? blockEl('Practice set (study)', s.study) : null,
-    s.delayed ? blockEl('A week later (delayed)', s.delayed) : null,
+    h('p', { class: 'small' }, 'Each learner was put in one of two groups at random, and never saw which. Arm 0 got full feedback on addition (A) and only the answer on shifts (B); arm 1 the other way round. The CSV uses the same arm numbers.'),
+    s.study ? blockEl('Practice set (study)', s.study, 'Full feedback minus answer only: ') : null,
+    s.delayed ? blockEl('A week later (delayed)', s.delayed, 'Topic that had full feedback minus topic that had the answer only: ') : null,
     h('p', { class: 'small muted' }, 'Pre-registered rule, set before any data: effect size (dz) ≥ 0.3 invest in the drill-down · < 0.1 stop · between: replicate with another class.'));
 }
 
@@ -152,7 +162,7 @@ const NO_INTERVAL = {
   oneArm: 'No interval: all codes come from one group, so feedback and topic cannot be told apart.',
 };
 
-function blockEl(title, b) {
+function blockEl(title, b, diffLabel) {
   const d = b.diff;
   let reading;
   if (!d) reading = 'No learner answered both topics yet.';
@@ -164,13 +174,14 @@ function blockEl(title, b) {
     h('div', { class: 'table-wrap' }, h('table', { class: 'table bd-arms' },
       h('thead', null, h('tr', null, h('th', null, 'Group'), h('th', null, 'Learners'), h('th', null, 'A: addition'), h('th', null, 'B: shifts'))),
       h('tbody', null, b.arms.map((a) => h('tr', null,
-        h('td', null, a.arm === 0 ? '1 (full feedback on A)' : '2 (full feedback on B)'),
+        h('td', null, a.arm === 0 ? 'Arm 0: full feedback on A' : 'Arm 1: full feedback on B'),
         h('td', null, String(a.n)),
         h('td', null, a.A.total ? `${pct(a.A.acc)} (${a.A.right}/${a.A.total})` : '—'),
         h('td', null, a.B.total ? `${pct(a.B.acc)} (${a.B.right}/${a.B.total})` : '—')))))),
     b.unknownArm ? h('p', { class: 'small muted' }, `${b.unknownArm} code${b.unknownArm === 1 ? '' : 's'} had no group (the learner used another device and skipped the paste), so ${b.unknownArm === 1 ? 'it is' : 'they are'} left out of the comparison.`) : null,
-    d ? h('p', { class: 'bd-diff' },
-      h('strong', null, 'Full feedback minus answer only: '),
+    // with one arm only, the difference mixes feedback with topic difficulty, so it is not shown
+    d && d.noInterval !== 'oneArm' ? h('p', { class: 'bd-diff' },
+      h('strong', null, diffLabel),
       `${pts(d.mean)} percentage points`,
       d.lo !== null && d.hi !== null ? ` (95% CI ${pts(d.lo)} to ${pts(d.hi)})` : '',
       `, n = ${d.n}`,

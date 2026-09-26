@@ -60,9 +60,9 @@ test('teacher: class, taught date, starter preview; starter on a projector', asy
     const d = new Date(); d.setDate(d.getDate() - 14);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
-  await page.check('#tc-t-J2771241add-on');
-  await page.fill('#tc-t-J2771241add-date', date14);
-  await page.dispatchEvent('#tc-t-J2771241add-date', 'change');
+  await page.check('#tc-t-J277124add-on');
+  await page.fill('#tc-t-J277124add-date', date14);
+  await page.dispatchEvent('#tc-t-J277124add-date', 'change');
   classes = await store(page, 'classes');
   const today = await page.evaluate(() => { const d = new Date(); return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000); });
   assert.equal(classes[0].taught['J277-1.2.4-add'], today - 14);
@@ -158,6 +158,8 @@ test('teacher: class, taught date, starter preview; starter on a projector', asy
   await page.keyboard.press('Space');
   await H.until(page, () => document.querySelector('.rv-done') || document.querySelector('.rv-key'));
   await H.shot(page, 'starter-revealed-1366');
+  const bottom = await page.evaluate(() => document.querySelector('.sr-next').getBoundingClientRect().bottom);
+  assert.ok(bottom <= 768, `Next is on screen at 1366×768 (bottom ${bottom})`);
   clean(s, 'teacher + starter');
   await s.close();
 });
@@ -337,6 +339,7 @@ test('board: pasted codes, junk and duplicates, misconceptions, worked example o
   assert.match(studyText, /n = 12/);
   assert.match(studyText, /Reading: (Invest|Stop|Replicate)/);
   assert.match(studyText, /≥ 0\.3 invest in the drill-down · < 0\.1 stop · between: replicate/);
+  await page.evaluate(() => document.querySelector('.bd-study').scrollIntoView());
   await H.shot(page, 'board-study-1366');
 
   // CSV

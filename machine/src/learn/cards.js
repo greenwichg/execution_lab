@@ -820,12 +820,6 @@ const DEFS = [
   },
 ];
 
-const JUMPS = {
-  jae: 'jump if above or equal, taken when CF = 0',
-  jbe: 'jump if below or equal, taken when CF = 1 or ZF = 1',
-  jb: 'jump if below, taken when CF = 1',
-  ja: 'jump if above, taken when CF = 0 and ZF = 0',
-};
 
 /** whether a conditional jump event was taken: the next event is not the fall-through */
 function takenOf(ctx, jmp) {

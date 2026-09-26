@@ -7,12 +7,12 @@ import { mulberry32, mixSeed } from '../../lib/rng.js';
 import { specById } from '../../learn/spec.js';
 import { tagLabel } from '../../learn/catalogue.js';
 import { itemForSpec, itemForTag, makeItem } from '../../learn/items/index.js';
-import { buildStarter, recordTap } from '../../learn/starter.js';
+import { recordTap } from '../../learn/starter.js';
 import { renderWhy, renderLayer } from '../why.js';
 import { moduleFor } from '../runner.js';
 import { mountAddition, isAddition, questionVisual, revealKey } from '../reveal.js';
 import { setNav } from '../nav.js';
-import { findClass, saveClass, sourceLabel, starterRng, today } from './teacher.js';
+import { findClass, saveClass, sourceLabel, starterPlan, startOfDay, today } from './teacher.js';
 
 const TAPS = [
   { result: 'got', key: '1', label: 'Most got it' },
@@ -58,12 +58,19 @@ export function render(el, ctx) {
   }
   document.body.classList.add('projector');
   const day = today();
-  const plan = buildStarter(cls, day, starterRng(cls, day));
+  // today's plan ignores today's taps, so a reload (or Esc and back) shows the same questions
+  const plan = starterPlan(cls, day);
+  const morning = startOfDay(cls, day);
   const qs = plan.map((entry, i) => {
     let item = null;
     try { item = itemFor(entry, cls, i, day); } catch (e) { console.error(e); }
-    return { entry, item, tag: entry.tag || inferTag(cls, entry.spec), revealed: false, tap: null, why: null };
+    return { entry, item, slot: i, tag: entry.tag || inferTag(morning, entry.spec), revealed: false, tap: null, why: null };
   }).filter((q) => q.item);
+  // taps already made today (before a reload) are shown, and a new tap replaces them
+  for (const q of qs) {
+    const t = (cls.taps || []).filter((x) => x && x.day === day && x.slot === q.slot && x.spec === q.entry.spec).pop();
+    if (t && TAP_TEXT[t.result]) { q.tap = t.result; q.revealed = true; }
+  }
   let at = 0;
   let ctl = null;          // the addition layout's controller
 
@@ -126,11 +133,11 @@ export function render(el, ctx) {
         if (q.tap === t.result) b.prepend(h('span', { class: 'sr-tick', 'aria-hidden': 'true' }, '✓ '));
         return b;
       }));
-    const whyBtn = bigBtn(q.whyCtl ? 'Deeper ↓' : 'Why ↓', 'W', () => why(), 'sr-whybtn');
+    const deepest = q.whyCtl && q.whyCtl.depth >= q.whyCount;
+    const whyBtn = deepest ? null : bigBtn(q.whyCtl ? 'Deeper ↓' : 'Why ↓', 'W', () => why(), 'sr-whybtn');
     actions.replaceChildren(
-      h('p', { class: 'sr-ask' }, q.tap ? `Recorded: ${TAP_TEXT[q.tap]}.` : 'How did the class do?'),
-      taps,
-      h('div', { class: 'sr-row' }, whyBtn, nav));
+      h('p', { class: 'sr-ask' }, q.tap ? `Recorded: ${TAP_TEXT[q.tap]}. Press another number to change it.` : 'How did the class do?'),
+      h('div', { class: 'sr-row' }, taps, whyBtn, nav));
   }
 
   function doReveal(animate) {
@@ -156,17 +163,11 @@ export function render(el, ctx) {
     const q = qs[at];
     if (!q || !q.revealed) { announce('Reveal the answer first (Space).'); return; }
     const fresh = findClass(cls.id) || cls;
-    let base = fresh;
-    if (q.tap) {
-      // changing the tap for this question replaces the one recorded before
-      const taps = (fresh.taps || []).slice();
-      for (let k = taps.length - 1; k >= 0; k--) {
-        const t = taps[k];
-        if (t.day === day && t.spec === q.entry.spec && (t.tag || null) === (q.tag || null) && t.result === q.tap) { taps.splice(k, 1); break; }
-      }
-      base = { ...fresh, taps };
-    }
-    cls = saveClass(recordTap(base, { spec: q.entry.spec, tag: q.tag || null, result, date: day }));
+    // one tap per question: a new tap for this question replaces the one recorded before
+    const taps = (fresh.taps || []).filter((t) => !(t && t.day === day && t.slot === q.slot && t.spec === q.entry.spec));
+    const next = recordTap({ ...fresh, taps }, { spec: q.entry.spec, tag: q.tag || null, result, date: day });
+    next.taps[next.taps.length - 1] = { ...next.taps[next.taps.length - 1], slot: q.slot };
+    cls = saveClass(next);
     q.tap = result;
     announce(`Recorded: ${TAP_TEXT[result]}.`);
     drawActions();
@@ -176,10 +177,14 @@ export function render(el, ctx) {
   function why() {
     const q = qs[at];
     if (!q || !q.revealed) { announce('Reveal the answer first (Space).'); return; }
-    if (q.whyCtl) { q.whyCtl.openNext(); drawActions(); return; }
+    if (q.whyCtl) {
+      if (q.whyCtl.depth >= q.whyCount) { announce("That's the deepest layer."); return; }
+      q.whyCtl.openNext(); drawActions(); return;
+    }
     let layers = [];
     try { layers = moduleFor(q.item).why(q.item, null, { level: q.item.level }) || []; } catch (e) { console.error(e); }
     if (!layers.length) { announce('There is no explanation for this question.'); return; }
+    q.whyCount = layers.length;
     q.whyCtl = renderWhy(q.els.whyHolder, layers, { level: q.item.level, startOpen: 0, firstLabel: 'Why? ↓' });
     q.whyCtl.openNext();
     drawActions();
@@ -188,7 +193,7 @@ export function render(el, ctx) {
   function end() {
     counter.textContent = 'Done';
     const next = (() => {
-      try { return buildStarter(findClass(cls.id) || cls, day + 1, starterRng(cls, day + 1)).filter((e) => e.source === 'missed'); } catch { return []; }
+      try { return starterPlan(findClass(cls.id) || cls, day + 1).filter((e) => e.source === 'missed'); } catch { return []; }
     })();
     const heading = h('h2', { class: 'sr-prompt', tabindex: '-1' }, 'Starter done');
     stage.replaceChildren(h('section', { class: 'sr-end stack' },

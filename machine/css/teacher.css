@@ -35,7 +35,8 @@
 
 /* ================================================================ projector starter */
 .sr {
-  --cell: clamp(2rem, min(8.6vh, calc((100vw - 6rem) / 11)), 5.6rem);
+  /* digits stay ≥ 48 px on a 1280×720 projector and larger (cell × .74) */
+  --cell: clamp(2rem, min(9.2vh, calc((100vw - 6rem) / 11)), 5.6rem);
   padding-top: 14px; padding-bottom: 24px;
 }
 .sr-top { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
@@ -49,9 +50,12 @@
 .sr-prompt { font-size: clamp(1.3rem, 1rem + 1.4vw, 2.1rem); font-weight: 700; max-width: 48ch; line-height: 1.25; }
 .sr-prompt:focus { outline: none; }
 .sr-visual:empty, .sr-answer:empty, .sr-why:empty { display: none; }
-.sr-board { font-size: 1.25rem; font-weight: 600; color: var(--ink-2); }
+.sr-board { font-size: 1.7rem; font-weight: 650; color: var(--ink); }
 .sr-ask { font-size: 1.15rem; font-weight: 650; }
-.sr-actions > * + * { margin-top: 12px; }
+.sr-actions > * + * { margin-top: 10px; }
+/* the buttons stay on screen when a tall answer or the Why rail pushes them down */
+.sr-actions { position: sticky; bottom: 0; z-index: 5; background: var(--paper); padding: 10px 0 12px; }
+.sr-why .why-foot .btn { display: none; }     /* the big Deeper ↓ (W) button above does this */
 .sr-row, .sr-taps, .sr-nav { display: flex; flex-wrap: wrap; align-items: stretch; gap: 12px; }
 .sr-nav { margin-left: auto; }
 .sr-btn { min-height: 60px; padding: 10px 20px; font-size: 1.05rem; border-width: 2px; }
@@ -61,7 +65,18 @@
 .sr-tap[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .sr-tap[aria-pressed="true"] .kbd { background: transparent; color: inherit; border-color: currentColor; }
 .sr-layer, .sr-why { max-width: 1100px; }
-.sr-why .why-say { font-size: 1.05rem; }
+.sr-layer .why-layer { margin-left: 0; padding-left: 0; border-left: 0; list-style: none; }
+.sr-layer .why-layer::before { display: none; }
+.sr .sh-bits .c { width: calc(var(--cell) * .62); height: calc(var(--cell) * .66); font-size: calc(var(--cell) * .42); }
+.sr .sh-label { width: 5em; font-size: 1rem; }
+.sr .sh-arrow { margin-left: calc(5em + 10px); font-size: 1rem; }
+.sr .twos-vis .sh-label.wide { width: 9em; }
+.sr .eq { font-size: calc(var(--cell) * .42); }
+.sr .eq-box { min-width: calc(var(--cell) * .7); height: calc(var(--cell) * .7); }
+/* read from the back of the room: explanation text at ≥ 22 px */
+.sr-why .why-say, .sr-layer .why-say { font-size: 1.4rem; max-width: 60ch; }
+.sr .why-title { font-size: 1rem; }
+.sr .cols-note, .sr .eq-legend { font-size: 1.15rem; }
 .sr-end h2 { font-size: 2rem; }
 .sr-summary { margin: 0; padding-left: 1.6rem; font-size: 1.15rem; }
 .sr-summary li { padding: 6px 0; border-bottom: 1px solid var(--line); }
@@ -78,7 +93,7 @@
 .rv-scroll { overflow-x: auto; max-width: 100%; padding: 4px 2px; }
 .rv-grid {
   display: grid; width: max-content;
-  grid-template-columns: calc(var(--cell) * .9) repeat(var(--cols), var(--cell)) minmax(calc(var(--cell) * 1.6), auto);
+  grid-template-columns: minmax(calc(var(--cell) * .9), max-content) repeat(var(--cols), var(--cell)) minmax(calc(var(--cell) * 1.6), auto);
   column-gap: calc(var(--cell) * .08);
   align-items: center; justify-items: center;
   font: 700 calc(var(--cell) * .74)/1 var(--mono);
@@ -89,7 +104,8 @@
 .rv-idx { height: calc(var(--cell) * .4); font-size: calc(var(--cell) * .24); font-weight: 500; color: var(--muted); }
 .rv-carry { height: calc(var(--cell) * .62); font-size: calc(var(--cell) * .44); color: var(--accent); opacity: 0; transform: translateY(calc(var(--cell) * .12)); transition: opacity .16s ease-out, transform .16s ease-out; }
 .rv-carry.on { opacity: 1; transform: none; }
-.rv-carry-out.on { color: var(--bad); }
+.rv-carry-out.on { color: var(--muted); }
+.rv-carry-out.rv-carry-lost.on { color: var(--bad); }
 .rv-res { border-top: calc(var(--cell) * .05) solid var(--ink); margin-top: calc(var(--cell) * .08); }
 .rv-res:not(.on) { color: transparent; }
 .rv-res.on { animation: rv-in .2s ease-out both; }
@@ -99,6 +115,7 @@
 @keyframes rv-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .rv-note:empty { display: none; }
 .rv-note { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 1.2rem; }
+.sr .rv-note { font-size: 1.5rem; }
 .rv-verdict { font-weight: 700; font-size: 1.25em; }
 .rv-over { color: var(--bad); }
 .rv-fits { color: var(--ok); }
@@ -108,7 +125,7 @@
 
 .rv-bitsrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
 .rv-bits { display: inline-flex; gap: calc(var(--cell, 2.4rem) * .08); max-width: 100%; }
-.rv-bitbox { display: inline-grid; place-items: center; width: var(--cell, 2.4rem); height: var(--cell, 2.4rem); border: 2px solid var(--line-strong); border-radius: 8px; background: var(--paper-2); font: 700 calc(var(--cell, 2.4rem) * .7)/1 var(--mono); }
+.rv-bitbox { display: inline-grid; place-items: center; width: var(--cell, 2.4rem); height: var(--cell, 2.4rem); border: 2px solid var(--line-strong); border-radius: 8px; background: var(--paper-2); font: 700 calc(var(--cell, 2.4rem) * .78)/1 var(--mono); }
 .rv-bitsnote { font-size: 1.15rem; font-weight: 600; color: var(--ink-2); }
 .rv-inputs { display: flex; flex-wrap: wrap; gap: 18px 32px; }
 .rv-input { display: inline-flex; align-items: center; gap: 12px; }
@@ -123,6 +140,8 @@
 
 /* ================================================================ homework / study set */
 .hs-small-h { font-size: 1.05rem; }
+/* the spec label is long ("OCR GCSE (J277) 1.2.4 · Binary addition and overflow"): let it wrap on phones */
+.hs .item-head .chip { white-space: normal; max-width: 100%; border-radius: 12px; }
 .hs-recover .row { flex-wrap: nowrap; }
 .hs-recover input { max-width: 16rem; }
 .hs-hand-in { font-size: 1.25rem; font-weight: 650; }
@@ -152,19 +171,26 @@
 
 /* worked example overlay (projector) */
 body.wx-open { overflow: hidden; }
-.wx { position: fixed; inset: 0; z-index: 100; background: var(--paper); color: var(--ink); overflow-y: auto; }
+.wx { position: fixed; inset: 0; z-index: 100; background: var(--paper); color: var(--ink); overflow-y: auto; font-size: 1.35rem; }
 .wx-inner { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
-.wx-head .chip { font-size: .85rem; }
+.wx-head .chip { font-size: 1rem; }
 .wx h2 { font-size: clamp(1.5rem, 1rem + 1.6vw, 2.3rem); }
 .wx h2:focus { outline: none; }
-.wx-fix { font-size: 1.1rem; color: var(--ink-2); max-width: 70ch; }
+.wx-fix { font-size: 1.3rem; color: var(--ink-2); max-width: 70ch; }
 .wx-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
 .wx-step { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: 14px; align-items: start; }
 .wx-num { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: 700 1.2rem/1 var(--mono); }
 .wx-body > * + * { margin-top: 6px; }
-.wx-sub { font-weight: 700; font-size: 1.15rem; }
+.wx-sub { font-weight: 700; font-size: 1.5rem; }
 .wx-layer { overflow-x: auto; }
-.wx-layer .why-layer { margin-left: 0; padding-left: 0; border-left: 0; }
+.wx .eq { font-size: 1.8rem; }
+.wx .eq-box { min-width: 3rem; height: 3rem; }
+.wx .eq-legend, .wx .cols-note { font-size: 1rem; }
+.wx .sh-bits .c { width: 2.6rem; height: 2.8rem; font-size: 1.5rem; }
+.wx .sh-label { width: 5em; font-size: 1rem; }
+.wx .sh-arrow { margin-left: calc(5em + 10px); font-size: 1rem; }
+.wx .why-say { font-size: 1.3rem; }
+.wx-layer .why-layer { margin-left: 0; padding-left: 0; border-left: 0; list-style: none; }
 .wx-layer .why-layer::before { display: none; }
 
 /* ================================================================ phones */
@@ -174,10 +200,17 @@ body.wx-open { overflow: hidden; }
   .sr-btn { min-height: 52px; padding: 8px 14px; font-size: 1rem; }
   .sr-tap { min-width: 0; flex: 1 1 100%; min-height: 56px; }
   .sr-nav { margin-left: 0; }
+  .sr-actions { position: static; padding: 0; }
   .sr-leave { margin-left: 0; }
+  .sr-board { font-size: 1.25rem; }
+  .sr .rv-note { font-size: 1.1rem; }
+  .sr-why .why-say, .sr-layer .why-say { font-size: 1.05rem; }
   .wx-inner { padding: 16px 16px 40px; }
   .wx-step { grid-template-columns: 2rem minmax(0, 1fr); gap: 10px; }
   .wx-num { width: 2rem; height: 2rem; font-size: 1rem; }
+  .wx { font-size: 1.1rem; }
+  .wx-sub { font-size: 1.2rem; }
+  .wx-fix, .wx .why-say { font-size: 1.05rem; }
   .hs-recover .row { flex-wrap: wrap; }
   .rv-key dt { min-width: 0; }
 }

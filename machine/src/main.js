@@ -26,7 +26,7 @@ function match(path) {
     const params = {};
     let ok = true;
     for (let i = 0; i < pp.length; i++) {
-      if (pp[i].startsWith(':')) params[pp[i].slice(1)] = decodeURIComponent(parts[i]);
+      if (pp[i].startsWith(':')) { try { params[pp[i].slice(1)] = decodeURIComponent(parts[i]); } catch { params[pp[i].slice(1)] = parts[i]; } }   // a mangled %-escape in a pasted link
       else if (pp[i] !== parts[i]) { ok = false; break; }
     }
     if (ok) return { pattern, load, params };

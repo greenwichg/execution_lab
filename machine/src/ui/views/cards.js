@@ -5,6 +5,7 @@ import { CARDS, build } from '../../learn/cards.js';
 import { specById } from '../../learn/spec.js';
 import { chip } from '../parts.js';
 import { stdChip } from '../code.js';
+import { load } from '../../lib/store.js';
 import { setNav } from '../nav.js';
 
 export const SECTION_ORDER = ['2.2', '2.3', '3.5', '3.6'];
@@ -20,6 +21,8 @@ function statusOf(card) {
 
 export function render(el) {
   setNav('#/cards');
+  const saved = load('cards.tried', []);
+  const tried = new Set(Array.isArray(saved) ? saved : []);
   const groups = SECTION_ORDER.map((sec) => ({ sec, cards: CARDS.filter((c) => groupOf(c.section) === sec) }))
     .filter((g) => g.cards.length);
 
@@ -38,7 +41,9 @@ export function render(el) {
           return h('li', null, h('a', { class: 'panel card-tile', href: href(`/card/${c.id}`) },
             h('div', { class: 'row spread card-tile-top' }, chip(c.section), h('span', { class: 'small muted' }, ASK_WORDS[c.ask] || 'Predict')),
             h('h3', { class: 'card-tile-title' }, c.title),
-            status ? h('div', { class: 'card-tile-std' }, stdChip(status)) : null));
+            // showing "undefined" before the learner has predicted would give the answer away
+            status && tried.has(c.id) ? h('div', { class: 'card-tile-std' }, stdChip(status))
+              : h('div', { class: 'card-tile-std small muted' }, 'C standard status: shown after you try it')));
         })));
     }),
     h('section', { class: 'panel paste-promo stack-sm', 'aria-labelledby': 'paste-h' },

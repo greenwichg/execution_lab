@@ -4,7 +4,7 @@
 // the product's learning path is Predict the Machine (machine/).
 //
 //   FFMPEG=/path/to/ffmpeg node tools/render-film/render.cjs [--fps 24] [--w 1280] [--h 720] [--q 1]
-//        [--from 0] [--to <seconds>] [--out media/code-execution-lab.mp4] [--frames-only]
+//        [--from 0] [--to <seconds>] [--out media/code-execution-lab.mp4] [--frames-only] [--reuse-frames] [--crf 30]
 // q=0 and q=1 look nearly identical in stills; q=0 renders ~40% faster.
 //
 // Needs the tests' Playwright install (cd tests && npm install) and an ffmpeg
@@ -15,7 +15,7 @@ const { execFileSync } = require('child_process');
 const H = require('../../tests/harness.cjs');
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : dflt; };
-const FPS = +arg('fps', 24), W = +arg('w', 1280), HGT = +arg('h', 720), Q = arg('q', '0');
+const FPS = +arg('fps', 24), W = +arg('w', 1280), HGT = +arg('h', 720), Q = arg('q', '0'), CRF = arg('crf', '30');
 const OUT = path.resolve(arg('out', 'media/code-execution-lab.mp4'));
 const FFMPEG = process.env.FFMPEG || 'ffmpeg';
 const WORK = path.resolve(arg('work', path.join(require('os').tmpdir(), 'cel-render')));
@@ -37,7 +37,10 @@ const WORK = path.resolve(arg('work', path.join(require('os').tmpdir(), 'cel-ren
   const n0 = Math.round(from * FPS), n1 = Math.round(to * FPS);
   console.log(`film ${info.duration.toFixed(1)} s · frames ${n0}–${n1} at ${FPS} fps · ${W}×${HGT} q=${Q}`);
   const t0 = Date.now();
-  for (let f = n0; f < n1; f++) {
+  const have = fs.readdirSync(path.join(WORK, 'frames')).filter((f) => f.endsWith('.jpg')).length;
+  const reuse = process.argv.includes('--reuse-frames') && have === n1 - n0;
+  if (reuse) console.log(`reusing ${have} frames in ${WORK}`);
+  for (let f = reuse ? n1 : n0; f < n1; f++) {
     await page.evaluate((F) => { const L = window.__lab; L.jumpFilm(F); L.step(0); }, f / FPS);
     await page.screenshot({ path: path.join(WORK, 'frames', `${String(f - n0).padStart(5, '0')}.jpg`), type: 'jpeg', quality: 90 });
     if ((f - n0) % 12 === 11) {
@@ -49,6 +52,7 @@ const WORK = path.resolve(arg('work', path.join(require('os').tmpdir(), 'cel-ren
   const asset = await page.evaluate(() => JSON.parse(document.getElementById('voice-asset').textContent));
   await s.close(); await H.teardown();
   if (process.argv.includes('--frames-only')) return;
+  const secs = ((n1 - n0) / FPS).toFixed(3);            // audio padded to exactly the video's length
   const lines = info.schedule.filter((l) => asset.lines[l.id] && l.F0 >= from && l.F0 < to);
   const inputs = [], filters = [];
   lines.forEach((l, i) => {
@@ -60,13 +64,20 @@ const WORK = path.resolve(arg('work', path.join(require('os').tmpdir(), 'cel-ren
     filters.push(`[${i + 1}:a]silenceremove=start_periods=1:start_threshold=-50dB,adelay=${ms}|${ms},aresample=48000[a${i}]`);
   });
   const mix = lines.length
-    ? `${filters.join(';')};${lines.map((_, i) => `[a${i}]`).join('')}amix=inputs=${lines.length}:normalize=0:dropout_transition=0,apad[aout]`
-    : 'anullsrc=r=48000:cl=mono[aout]';
+    ? `${filters.join(';')};${lines.map((_, i) => `[a${i}]`).join('')}amix=inputs=${lines.length}:normalize=0:dropout_transition=0,apad=whole_dur=${secs}[aout]`
+    : `anullsrc=r=48000:cl=mono,atrim=0:${secs}[aout]`;
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
+  // two passes: mixing the clips in the same graph as the image sequence gave
+  // a silent track, so the narration is mixed to WAV first (input 0 is a
+  // placeholder so the clip inputs keep their indices) and then muxed.
+  const wav = path.join(WORK, 'narration.wav');
   execFileSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error',
-    '-framerate', String(FPS), '-i', path.join(WORK, 'frames', '%05d.jpg'), ...inputs,
-    '-filter_complex', mix, '-map', '0:v', '-map', '[aout]', '-shortest',
-    '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+    '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono', ...inputs,
+    '-filter_complex', mix, '-map', '[aout]', '-t', secs, wav], { stdio: 'inherit' });
+  execFileSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error',
+    '-framerate', String(FPS), '-i', path.join(WORK, 'frames', '%05d.jpg'), '-i', wav,
+    '-map', '0:v', '-map', '1:a', '-t', secs,
+    '-c:v', 'libx264', '-preset', 'slow', '-crf', CRF, '-tune', 'grain', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
     '-c:a', 'aac', '-b:a', '96k', OUT], { stdio: 'inherit' });
   console.log(`wrote ${OUT} (${(fs.statSync(OUT).size / 1e6).toFixed(1)} MB)`);
 })().catch((e) => { console.error(e); process.exit(1); });

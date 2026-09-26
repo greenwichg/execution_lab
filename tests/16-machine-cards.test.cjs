@@ -18,7 +18,6 @@ before(async () => {
 });
 
 const SHORT = 'int a = 5;\nint b = a * 3;\nunsigned u = 2;\nu = u - b;\nprintf("%u\\n", u);';
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const foreign = (reqs) => reqs.filter((u) => !/^(https?:\/\/127\.0\.0\.1[:/]|data:|blob:|about:)/.test(u));
 const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth);
 
@@ -36,7 +35,7 @@ async function answerCard(page, item, answer) {
   const kind = item.card.ask.kind;
   if (kind === 'output') await page.fill('.item-answer textarea', answer);
   else if (kind === 'value') await page.fill('.item-answer input.num-in', String(answer));
-  else if (kind === 'branch') await page.click(`.item-answer .seg button:text-is("${cap(answer)}")`);
+  else if (kind === 'branch') await page.click(`.item-answer .seg button:text-is("${answer}")`);
   else if (kind === 'flags') {
     for (const [n, v] of Object.entries(answer)) {
       await page.click(`.item-answer .flag-row:has(abbr:text-is("${n}")) .seg button:text-is("${v}")`);
@@ -63,14 +62,13 @@ test('cards: list, every card right, classic mistakes, Why to the deepest layer,
   const s = await H.openMachine('/cards', { width: 1366, height: 768 });
   const { page, errors, requests } = s;
 
-  // the list: 12 cards in 4 sections, each with the C-standard status in words
+  // the list: 12 cards in 4 sections; a card's C-standard status stays hidden until it has been
+  // tried (showing "undefined" first would give the answer away)
   const list = await page.$$eval('.card-group', (gs) => gs.map((g) => ({ h: g.querySelector('h2').textContent, n: g.querySelectorAll('a.card-tile').length })));
   assert.deepEqual(list.map((g) => g.h.split(' ')[0]), ['2.2', '2.3', '3.5', '3.6']);
   assert.equal(list.reduce((a, g) => a + g.n, 0), 12);
-  const stds = await page.$$eval('a.card-tile .std-chip', (cs) => cs.map((c) => c.textContent.replace(/^\W+/, '')));
-  assert.equal(stds.length, 12);
-  for (const t of stds) assert.match(t, /^C standard: (defined|implementation-defined|undefined)$/);
-  assert.ok(stds.some((t) => t.endsWith(' undefined')) && stds.some((t) => t.endsWith('implementation-defined')));
+  assert.equal(await page.locator('a.card-tile .std-chip').count(), 0, 'no status before trying');
+  assert.equal(await page.locator('a.card-tile:has-text("shown after you try it")').count(), 12);
   assert.equal(await page.locator('a[href$="#/paste"]').count() >= 1, true, 'links to paste');
   assert.match(await page.textContent('.honest'), /gcc -O0 on x86-64/);
   await H.shot(page, 'cards-list-1366');
@@ -90,6 +88,12 @@ test('cards: list, every card right, classic mistakes, Why to the deepest layer,
     assert.ok((await page.textContent('.gcc-line')).startsWith('gcc -O0 on x86-64:'), c.id);
     if (i === 8) await H.shot(page, 'card-correct-1366');
   }
+  // once every card has been tried, the list shows each status in words
+  await go(page, '/cards', 'cards', 'C on x86-64: twelve cards');
+  const stds = await page.$$eval('a.card-tile .std-chip', (cs) => cs.map((c) => c.textContent.replace(/^\W+/, '')));
+  assert.equal(stds.length, 12);
+  for (const t of stds) assert.match(t, /^C standard: (defined|implementation-defined|undefined)$/);
+  assert.ok(stds.some((t) => t.endsWith(' undefined')) && stds.some((t) => t.endsWith('implementation-defined')));
 
   // classic wrong answers name the misconception
   const classic = [
@@ -255,7 +259,7 @@ test('paste: wrong prediction → checkpoints → diagnosis → Why; errors; sha
   await page.fill('#pe-code', CODE);
   await page.click('#pe-share');
   const url = await page.textContent('.share-panel .copy-value');
-  assert.match(url, /#\/paste\?code=[A-Za-z0-9_-]+$/);
+  assert.match(url, /#\/paste\?k=[0-9a-z]+&code=[A-Za-z0-9_-]+$/);
   await page.fill('#pe-code', 'int z = 0;');
   await page.goto(url);
   await H.until(page, () => /Loaded the program from your link/.test(document.querySelector('main[data-view="paste"]')?.textContent || ''));

@@ -114,7 +114,9 @@ body.projector {
 .compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .compare-note { grid-column: 1 / -1; }
 .out-label { font-weight: 650; color: var(--ink-2); margin-bottom: 4px; }
-.out-pre { padding: 8px 0; }
+.out-pre { padding: 8px 0; position: relative; max-height: 26rem; overflow: auto; }
+.cp-hint:empty { display: none; }
+.card-page .card-variant-note a { font-weight: 600; }
 .out-line { display: block; position: relative; padding: 0 12px 0 30px; min-height: 1.55em; }
 .out-line.first-diff { background: var(--hl); font-weight: 700; }
 .out-line.first-diff::after { content: '▸'; position: absolute; left: 10px; top: 0; color: var(--ink); }
@@ -146,3 +148,5 @@ body.projector {
   .card-page .machine-did-value { font-size: 1.4rem; }
   .pe-text, .pe-gutter, .pe-predict, .out-pre { font-size: 1.15rem; }
 }
+.pe-undo:empty { display: none; }
+.pe-undo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }

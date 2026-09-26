@@ -621,7 +621,7 @@ function untracedEvent(analysis, w) {
 
 /** the specific 1–2 sentence explanation of a recognised trap at one write */
 function surpriseDetail(analysis, w) {
-  const { prog, res } = analysis;
+  const { prog } = analysis;
   const s = w.surprise;
   const e = trapEvent(analysis, s);
   if (!e) return `The machine stores ${w.val} in ${w.name} (${w.type}) here.`;

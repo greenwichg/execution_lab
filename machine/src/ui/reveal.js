@@ -59,7 +59,10 @@ export function mountAddition(el, item) {
   // bit numbers (small), then carries, operands, result
   put('', [cell('', 'rv-idx'), ...order(w).map((i) => cell(String(i), 'rv-idx'))], null, 'rv-idx-label');
   const carryCells = [];
-  for (let i = w; i >= 0; i--) carryCells[i] = cell('', ['rv-carry', i === w && 'rv-carry-out']);
+  // the carry out of the top column is only drawn as lost (orange, struck through) when it is an overflow;
+  // in a signed sum without overflow it is simply ignored, so it stays grey
+  const lostOut = d.cout === 1 && d.overflow;
+  for (let i = w; i >= 0; i--) carryCells[i] = cell('', ['rv-carry', i === w && 'rv-carry-out', i === w && lostOut && 'rv-carry-lost']);
   put('carry', order(w + 1).map((i) => carryCells[i]), null, 'rv-carry-label');
   const aRight = h('span', { class: 'rv-right' });
   const bRight = h('span', { class: 'rv-right' });
@@ -90,7 +93,7 @@ export function mountAddition(el, item) {
     for (let i = 0; i < w; i++) { resCells[i].textContent = String(d.result[i]); resCells[i].classList.add('on'); }
   };
   const showEnd = () => {
-    if (d.cout === 1) {
+    if (lostOut) {
       resCells[w].textContent = '1';
       resCells[w].classList.add('on', 'rv-lost');
     }
@@ -98,7 +101,7 @@ export function mountAddition(el, item) {
     bRight.textContent = d.labels.b;
     rRight.textContent = d.labels.r;
     root.classList.add('rv-done');
-    note.replaceChildren(
+    note.replaceChildren(...[
       h('span', { class: ['rv-verdict', d.overflow ? 'rv-over' : 'rv-fits'] },
         h('span', { class: 'rv-glyph', 'aria-hidden': 'true' }, d.overflow ? '⚠' : '✓'), ' ', d.message),
       d.flags && Object.keys(d.flags).length > 1
@@ -106,7 +109,7 @@ export function mountAddition(el, item) {
         : null,
       d.cout === 1 && d.lostIsOverflow
         ? h('span', { class: 'rv-lostnote' }, h('span', { class: 'lost-mark', 'aria-hidden': 'true' }, '1'), ` is lost — there is no bit ${w} to keep it.`)
-        : null);
+        : null].filter(Boolean));
     summary.textContent = `${d.labels.a} ${d.sub ? 'minus' : 'plus'} ${d.sub ? num(item.show.bValue) : d.labels.b}: result ${msb(d.result)}, which is ${d.labels.r}. ${d.message}`;
   };
   const finishNow = () => {
@@ -191,7 +194,7 @@ export function keyRows(item) {
     } else if (f.kind === 'flags' && typeof v === 'object') {
       rows.push([f.label, Object.entries(v).map(([k, x]) => `${k} = ${x}`).join(' · '), false]);
     } else if (typeof v === 'string' && f.kind !== 'text') rows.push([f.label, cap(v), false]);
-    else rows.push([f.label, String(v), false]);
+    else rows.push([f.label, typeof v === 'number' ? num(v) : String(v), false]);
   }
   return rows;
 }
