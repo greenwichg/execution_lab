@@ -96,7 +96,7 @@ export function ruleClause(n) {
  * Specific, two-sentence explanation of a wrong column. r and co are what the
  * learner wrote, so "ignored the carry" and "dropped the carry" read differently.
  */
-export function columnDetail(tag, i, a, b, c, r = null, co = null, name = colName(i)) {
+export function columnDetail(tag, i, a, b, c, r = null, co = null, name = colName(i), top = false) {
   const n = a + b + c;
   const t = colTerms(a, b, c);
   if (tag === 'add_or') return `In ${name} you worked out ${t} as 1 with no carry. ${t} = 2, which is 10 in binary: write 0 and carry 1.`;
@@ -104,9 +104,12 @@ export function columnDetail(tag, i, a, b, c, r = null, co = null, name = colNam
   if (tag === 'add_no_carry') {
     const [s0, c0] = colRule(a, b, 0);
     if (c === 1 && r === s0 && (co ?? 0) === c0) return `A carry of 1 comes into ${name}, but you didn't add it. ${t} ${ruleClause(n)}.`;
-    return `In ${name}, ${t} ${ruleClause(n)}. You didn't carry the 1 into the next column to the left.`;
+    // The top column has no column to its left: its carry out is the overflow.
+    return top
+      ? `In ${name}, ${t} ${ruleClause(n)}. You didn't carry the 1 out of the top column, and that lost carry is the overflow.`
+      : `In ${name}, ${t} ${ruleClause(n)}. You didn't carry the 1 into the next column to the left.`;
   }
-  return `Your working first differs from the machine in ${name}. There ${t} ${ruleClause(n)}.`;
+  return `Check ${name} again: ${t} ${ruleClause(n)}.`;
 }
 
 /**
@@ -178,12 +181,16 @@ export function columnCheckpoint(i, a, b, c, name = colName(i)) {
 /**
  * Checkpoint flow for a wrong result bit at column i (≤ 2 questions):
  * the carry into i, then i's rule. Returns { next } or { tag, slip }.
+ * `altC` is the carry into i by another valid method (subtracting by adding
+ * −b rather than ~b + 1): a learner who gives it has not dropped a carry.
  */
-export function resultBitFlow(i, a, b, c, cps, name = colName(i)) {
+export function resultBitFlow(i, a, b, c, cps, name = colName(i), altC = c) {
   let j = 0;
   if (i > 0) {
     if (cps.length <= j) return { next: carryCheckpoint(i, c, name) };
-    if (cps[j] !== c) return { tag: c === 1 ? 'add_no_carry' : 'other', carryWrong: true };
+    // "Not sure" is not evidence of a misconception, so nothing is tagged.
+    if (cps[j] === null || cps[j] === undefined) return { tag: 'other', carryWrong: true, unsure: true };
+    if (cps[j] !== c && cps[j] !== altC) return { tag: c === 1 ? 'add_no_carry' : 'other', carryWrong: true };
     j++;
   }
   if (cps.length <= j) return { next: columnCheckpoint(i, a, b, c, name) };
@@ -298,6 +305,24 @@ function defaultFocus(item) {
   return 0;
 }
 
+/** the overflow answer, when that is the first cell the learner left empty */
+function overflowUnanswered(item) {
+  return finish(null, "You didn't say whether there is an overflow.",
+    item.sim.cout
+      ? 'A 1 carries out of the top column, so there is an overflow error.'
+      : 'Nothing carries out of the top column, so there is no overflow.',
+    { column: item.params.w - 1, field: 'overflow' });
+}
+
+/** a result box left empty after everything before it (in working order) was right */
+function columnUnanswered(item, i) {
+  const { a: A, b: B } = item.show;
+  const c = item.sim.carries;
+  return finish(null, `You left ${colName(i)} of the result empty.`,
+    `${i === 0 ? 'Start there' : 'Everything to its right is correct'}. In ${colName(i)}, ${colTerms(A[i], B[i], c[i])} ${ruleClause(A[i] + B[i] + c[i])}.`,
+    { column: i, field: 'result', index: i });
+}
+
 // Once every column is right, only the 9th box and the overflow answer remain.
 function diagnoseTop(item, answer) {
   const { w, a, b } = item.params;
@@ -306,20 +331,56 @@ function diagnoseTop(item, answer) {
   const extra = answer.result?.[w];
   if (extra !== null && extra !== undefined) {
     return finish('add_ninth_bit', `Every column is right, but you wrote a ${ordinal(w + 1)} bit.`,
-      `This is ${aWidth(w)} sum, so the carry out of the top column has nowhere to go. Leave the ${ordinal(w + 1)} box empty: that lost carry is the overflow.`,
+      item.sim.cout
+        ? `This is ${aWidth(w)} sum, so the carry out of the top column has nowhere to go. Leave the ${ordinal(w + 1)} box empty: that lost carry is the overflow.`
+        : `This is ${aWidth(w)} sum, so the answer has exactly ${w} bits. Leave the ${ordinal(w + 1)} box empty.`,
       { column: w - 1, field: 'result', index: w });
   }
+  if (answer.overflow === null || answer.overflow === undefined) return overflowUnanswered(item);
   if (answer.overflow !== key.overflow) {
     if (key.overflow === 'yes') {
       return finish('add_overflow_missed', 'Every column is right, but you missed the overflow.',
-        `There is a carry out of the top column, so the true answer ${a + b} needs ${w + 1} bits. That is an overflow: the ${w}-bit result is only ${item.sim.value}.`, focus);
+        `There is a carry out of the top column, so the true answer ${a + b} needs ${w + 1} bits. That is an overflow error: the ${w}-bit result is only ${item.sim.value}.`, focus);
     }
-    if (answer.overflow === 'yes') {
-      return finish('add_overflow_false', 'Every column is right, but there is no overflow.',
-        `There is no carry out of the top column, so the answer ${a + b} fits in ${w} bits. Overflow only happens when the answer is bigger than ${2 ** w - 1}.`, focus);
-    }
+    return finish('add_overflow_false', 'Every column is right, but there is no overflow.',
+      `There is no carry out of the top column, so the answer ${a + b} fits in ${w} bits. Overflow only happens when the answer is bigger than ${2 ** w - 1}.`, focus);
   }
   return finish(null, 'All correct.', 'Every column, carry and the overflow answer match the machine.', { column: defaultFocus(item) });
+}
+
+/**
+ * The carry out of column i is missing but its sum bit is right. If the next
+ * column's sum bit is right too, the learner DID carry (dropping a carry
+ * always flips the next sum bit) and only left it out of the carry row.
+ */
+function unwrittenCarry(item, answer, i) {
+  const { w, a, b } = item.params;
+  const res = answer.result || [];
+  const focus = { column: i, field: 'carries', index: i + 1 };
+  if (i < w - 1) {
+    const { a: A, b: B } = item.show;
+    const c = item.sim.carries;
+    if (res[i + 1] === null || res[i + 1] === undefined) {
+      return finish(null, `You stopped after ${colName(i)}.`,
+        `In ${colName(i)}, ${colTerms(A[i], B[i], c[i])} ${ruleClause(A[i] + B[i] + c[i])}. Write that carry above ${colName(i + 1)}, then keep going left.`, focus);
+    }
+    if (res[i + 1] !== item.key.result[i + 1]) return null;
+    return finish('other', `You didn't write the carry from ${colName(i)}.`,
+      `${cap(colName(i + 1))} of your result is right, so you did carry the 1 in your head. Write every carry above the next column so your working shows it.`, focus);
+  }
+  // The top column's carry out is the overflow.
+  if (answer.overflow === 'yes') {
+    return finish('other', "You didn't write the carry out of the top column.",
+      'You spotted the overflow, so you knew a 1 carries out of the top column. Write that carry too, so your working shows where the overflow comes from.', focus);
+  }
+  return finish('add_overflow_missed', 'You missed the carry out of the top column.',
+    `A 1 carries out of the top column, so the true answer ${a + b} needs ${w + 1} bits. That lost carry is an overflow error.`, focus);
+}
+
+/** the column that made the lowest carry: where a misplaced carry row first shows */
+function firstCarryColumn(item) {
+  const i = item.sim.carries.findIndex((c, j) => j > 0 && c === 1);
+  return Math.max(0, i - 1);
 }
 
 export function diagnose(item, answer, marking, cpAnswers = []) {
@@ -330,22 +391,32 @@ export function diagnose(item, answer, marking, cpAnswers = []) {
   const key = item.key;
   const c = item.sim.carries;
   const res = answer.result || [];
+  const fw = m.firstWrong;
+
+  // The first cell that differs (in working order) is empty: nothing to classify.
+  if (fw && fw.field === 'overflow' && m.cells.overflow === 'missing') return overflowUnanswered(item);
+  if (fw && fw.field === 'result' && fw.index < w && m.cells.result[fw.index] === 'missing') return columnUnanswered(item, fw.index);
 
   if (item.show.ask === 'full') {
-    const dir = shiftedCarries(key.carries, answer.carries, w);
+    // A whole carry row moved one column, noticed where it first goes wrong.
+    const dir = fw && fw.field === 'carries' ? shiftedCarries(key.carries, answer.carries, w) : null;
     if (dir) {
-      const k = carryRow(key.carries, w);
-      const j = k.findIndex((bit, idx) => bit !== (answer.carries?.[idx + 1] ?? 0));
+      const col = firstCarryColumn(item);
       return finish('add_carry_wrong_col', 'Your carry row is shifted by one column.',
         `Each of your carries is one column to the ${dir} of where it belongs. Write each carry above the next column to the left, because that is the column it is added into.`,
-        { column: Math.max(0, j), field: 'carries', index: j + 1 });
+        { column: col, field: 'carries', index: col + 1 });
     }
     for (let i = 0; i < w; i++) {
       const rOk = res[i] === key.result[i];
-      const cOk = (answer.carries?.[i + 1] ?? 0) === key.carries[i + 1];
+      const co = answer.carries?.[i + 1] ?? null;
+      const cOk = (co ?? 0) === key.carries[i + 1];
       if (rOk && cOk) continue;
-      const tag = classifyColumn(A[i], B[i], c[i], res[i] ?? null, answer.carries?.[i + 1] ?? null);
-      return finish(tag, `Your working first goes wrong in ${colName(i)}.`, columnDetail(tag, i, A[i], B[i], c[i], res[i] ?? null, answer.carries?.[i + 1] ?? null),
+      if (rOk && key.carries[i + 1] === 1) {
+        const d = unwrittenCarry(item, answer, i);
+        if (d) return d;
+      }
+      const tag = classifyColumn(A[i], B[i], c[i], res[i] ?? null, co);
+      return finish(tag, `Your working first goes wrong in ${colName(i)}.`, columnDetail(tag, i, A[i], B[i], c[i], res[i] ?? null, co, colName(i), i === w - 1),
         { column: i, field: rOk ? 'carries' : 'result', index: rOk ? i + 1 : i });
     }
     return diagnoseTop(item, answer);
@@ -358,16 +429,23 @@ export function diagnose(item, answer, marking, cpAnswers = []) {
   if (flow.next) return { next: flow.next, diagnosis: null };
   const focus = { column: i, field: 'result', index: i };
   const headline = `Your answer first goes wrong in ${colName(i)}.`;
-  if (flow.carryWrong) {
-    const detail = c[i] === 1
-      ? `A carry of 1 comes into ${colName(i)} from the column to its right, but you didn't carry it. When a column adds up to 2 or 3, write the last bit and carry 1 left.`
-      : `No carry comes into ${colName(i)}: the column to its right adds up to less than 2. Only carry when a column adds up to 2 or 3.`;
-    return finish(flow.tag, headline, detail, focus);
-  }
+  if (flow.carryWrong) return finish(flow.tag, headline, carryDetail(c[i], colName(i), flow.unsure), focus);
   if (flow.slip) {
     return finish('other', headline, `You can do ${colName(i)} when asked, so this was probably a slip when writing the answer. Check each column as you write it.`, focus);
   }
-  return finish(flow.tag, headline, columnDetail(flow.tag, i, A[i], B[i], c[i], flow.got?.[0] ?? null, flow.got?.[1] ?? null), focus);
+  return finish(flow.tag, headline, columnDetail(flow.tag, i, A[i], B[i], c[i], flow.got?.[0] ?? null, flow.got?.[1] ?? null, colName(i), i === w - 1), focus);
+}
+
+/** what went wrong with the carry into a column (after the carry checkpoint) */
+export function carryDetail(c, name, unsure = false) {
+  if (unsure) {
+    return c === 1
+      ? `A carry of 1 comes into ${name}, because the column to its right adds up to 2 or 3. Keep track of every carry as you work right to left.`
+      : `No carry comes into ${name}, because the column to its right adds up to less than 2. Keep track of every carry as you work right to left.`;
+  }
+  return c === 1
+    ? `A carry of 1 comes into ${name} from the column to its right, but you didn't carry it. When a column adds up to 2 or 3, write the last bit and carry 1 left.`
+    : `No carry comes into ${name}: the column to its right adds up to less than 2. Only carry when a column adds up to 2 or 3.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +618,11 @@ export function encodeParams(p) {
   return [p.w, p.a, p.b, ASKS.indexOf(p.ask === 'result' ? 'result' : 'full'), levelCode(p.level)];
 }
 
+// Review links are untrusted: clamp every number so a damaged link still
+// builds a valid item instead of throwing.
 export function decodeParams(ints) {
-  const [w, a, b, ask, lv] = ints;
-  return withLevel({ w, a, b, ask: ASKS[ask] || 'full' }, levelFrom(lv));
+  const [w0, a, b, ask, lv] = ints;
+  const w = clampW(w0, 4, 16, 8);
+  const top = 2 ** w - 1;
+  return withLevel({ w, a: clampW(a, 0, top, 1), b: clampW(b, 0, top, 1), ask: ASKS[ask] || 'full' }, levelFrom(lv));
 }

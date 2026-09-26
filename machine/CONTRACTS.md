@@ -145,7 +145,7 @@ export function diagnose(item, answer, marking, cpAnswers = []) → { next: Chec
 export function why(item, diagnosis, { level }) → Layer[]
 export function variant(item, tagId, rng) → params    // new values that exercise tagId
 export function encodeParams(params) → int[]          // small non-negative ints, for URLs/queues
-export function decodeParams(ints) → params
+export function decodeParams(ints) → params           // should throw on ints its generator never makes (review links are untrusted)
 ```
 
 `src/learn/items/index.js` exports `ITEM_TYPES` (map TYPE → module),
@@ -190,6 +190,23 @@ left.
   `Answer { bits: (0|1|null)[w], flags: { CF?, OF?, SF?, ZF? } }` (0|1|null each).
 - **fa** `params { a, b, cin, wires }` → `Answer { sum, cout, x1?, a1?, a2? }`.
 
+Binary item notes (items owner):
+- Every binary type's params may carry an optional `level` (encoded by
+  `encodeParams`); `item.level` defaults per type when it is absent.
+- Each binary type module also exports `TARGETS` (the tag ids `opts.target`
+  can aim at). `generate` opts may include `avoid: params` (return different
+  numbers) and per type `ask`, `kind`/`dir`/`askValue`, `task`, `op`/`askFlags`, `wires`.
+  `itemForTag(tagId, rng, { type?, ...opts })` returns `null` for a tag no
+  type practises; `opts.type` chooses e.g. `sadd`/`fa` for `add_*` tags.
+- `add`: the result field has `width: w + 1, optionalIndex: w`. In `cells`,
+  `null` means "not asked": `carries[0]`, all carries when `ask: 'result'`,
+  and `result[w]` when left empty (`'extra'` when filled). An empty carry box
+  counts as 0. `sadd`: `cells.flags` is a Status[] in `askFlags` order.
+- Checkpoints from add/sadd also carry `column` (and `a, b, c` for the
+  column-rule question); the `bits` checkpoint answer is `[sum, carryOut]` (LSB-first).
+- Built items also carry `sim` (the engine's full result: carries, flags,
+  lost bits) for UI use; it is not part of the JSON identity (`type, params`).
+
 ### Marking
 
 ```js
@@ -220,6 +237,11 @@ Diagnosis = {
 }
 ```
 
+Binary items: when the first wrong cell in working order is **empty**, the
+diagnosis has `tag: null` (nothing to classify) and a headline saying what was
+left empty. A `null` checkpoint answer ("Not sure") is never taken as evidence
+of a misconception.
+
 ### Why layers
 
 `why()` returns an ordered array, shallow → deep. The UI shows one layer per
@@ -237,7 +259,7 @@ Kinds and their `data`:
 | `asm` | `{ rows: [{ addr, bytes: 'hex bytes', text, hot }], note }` |
 | `regs` | `{ before: {name: value}, after: {name: value}, changed: [name], width }` |
 | `flags` | `{ CF, ZF, SF, OF, why: { CF?, OF?, SF?, ZF? } }` (each why ≤ 1 sentence) |
-| `columns` | `{ w, a, b, op, carries, result, highlight, dropped, signed, labels: { a, b, r } }` — an addition laid out in columns; `a`,`b`,`result` LSB-first bit arrays, `carries` as in Answer; `dropped` true when the carry out is lost; for subtraction `op: '-'` and `b` is already inverted with `carries[0] = 1` shown |
+| `columns` | `{ w, a, b, op, carries, result, highlight, dropped, signed, labels: { a, b, r } }` — an addition laid out in columns; `a`,`b`,`result` LSB-first bit arrays, `carries` as in Answer; `dropped` true when the carry out is lost; for subtraction `op: '-'` and `b` is already inverted with `carries[0] = 1` shown. Optional `base` (default 0): the register bit number of column 0, for an 8-bit window of a wider add (cards show bits 31–24 with `base: 24`); then `carries[0]` is the real carry arriving from bit `base − 1`, and `dropped` is only true when the window's top is the register's top bit |
 | `column` | `{ k, a, b, cin, sum, cout }` — one column's rule |
 | `adder` | `{ a, b, cin, x1, a1, a2, sum, cout }` — a full adder with live wire values (x1 = a⊕b, a1 = a·b, a2 = x1·cin) |
 | `shift` | `{ w, before, after, dir, k, fill, lost: [bit indices that fell off] }` |
@@ -263,12 +285,32 @@ item.card = { id, section: 'CS:APP 2.3.2', title, src, ask, std: { status: 'defi
 `diagnosePaste(analysis, predicted, cpAnswers) → { next, diagnosis }` (bisection
 over variable-write events, ≤ 3 checkpoints), `whyPaste(analysis, diagnosis) → Layer[]`.
 
+Card details (cards owner):
+
+- `CARDS[i] = { id, section: 'CS:APP 2.2.3', title, spec, tags: [tagId], ask: kind }`; `encodeParams` →
+  `[cardIndex, v]`, `v` ∈ 0–9999. `generate` opts: `section` ('2.2' matches 2.2.x), `target`, `id`, `v`, `avoid`.
+- One field per card. Answers: output → `{ output: string }` (field kind `text`, compared after
+  trimming trailing whitespace per line and trailing newlines); value → `{ value: number }` (`number`,
+  `ask.var` names the variable); flags → `{ flags: { CF, ZF, SF, OF } }` (`flags` field with
+  `flags: ['CF','ZF','SF','OF']`; `cells.flags` is a Status[] in that order); branch → `{ branch: string }`
+  (`choice`, `ask.choices` are the messages).
+- `item.show = { src, lines, section, title, focusLine }`; `item.sim` = the engine run (`prog`, `res`, `vals`).
+- Flags diagnoses carry `focus.flag`. Card checkpoints use input kinds `number`, `bit` and `choice`.
+- `paste.js`: `analysis.events` is the list of variable writes in execution order
+  `{ k, n (trace index), line, v, name, type, val, nth, times, surprise: { tag } | null, key }`;
+  paste checkpoints carry `line` and `event` (= k); `diagnosis.focus = { line, event? }` where `event`
+  indexes `analysis.events`. When the trace hits its limit, writes are rebuilt from `res.steps` and
+  `finalVars` with `n: null, key: null` (traps found from `aluLog`); `final: true` marks a variable's
+  end value (prompt "What value does x end up with?"). A checkpoint `answer` is a BigInt beyond ±2^53. paste.js also exports the layer kit the cards use (`asmLayer`, `regsLayer`,
+  `flagsLayer`, `columnsLayer`, `adderLayer`, `shiftLayer`, `flagReasons`, `normOutput` …).
+- `ctags.js` holds only `c_*` ids; `flags_*` stay in `tags.js`.
+
 ## Engine contract (`src/engine/minic.js`)
 
 ```js
 export const LIMITS = { lines: 30, cols: 72, vars: 32, steps: 200000, output: 4000 }
 export class CError extends Error { line; col; kind }     // kind: 'syntax'|'type'|'limit'|'runtime'
-export function compile(src) → Program
+export function compile(src, { limits? = true }) → Program
 export function run(prog, { maxSteps?, trace? = false, traceLimit? = 4000 }) → Result
 ```
 
@@ -282,6 +324,27 @@ Result = {
   aluLog, finalVars,
 }
 ```
+
+Engine details (engine owner):
+
+- `compile(src, { limits: false })` skips the 30-line / 72-column check (the Lab
+  corpus has a long line); the variable limit always applies. Also exported:
+  `TYPES` (name → `{ name, size, bits, signed, rank, min, max }`, BigInt
+  min/max), `promote(t)`, `commonType(a, b)`, `wrapTo(v, t)`, `formatPrintf`,
+  `encode`, `text`.
+- `vars[].type` is one of `'char' 'signed char' 'unsigned char' 'short'
+  'unsigned short' 'int' 'unsigned int' 'long' 'unsigned long'`.
+- C values (`writes[].val`, `finalVars`, `aluLog` recs' `a b r`) are Numbers, or
+  BigInts when a 64-bit value is beyond ±2^53. Event registers and `a b r` are
+  always unsigned BigInt bit patterns. Events may also carry `write: { d, width,
+  val, v }` (a stack store; `v` = var id) and, for div/idiv, `q` and `rem`; `b`
+  is absent for `not`. `res.eventsTruncated` is true when `traceLimit` was hit.
+- `Inst.alu = { op, signed, width, node }`: `op` is the C operator (`'+'`,
+  `'<'`, `'>>'`, `'++'`, `'neg'`, `'~'`, `'!'` …) in the type it was computed in.
+- CError kinds: `'syntax'` (unreadable or unsupported C), `'type'` (undeclared or
+  redeclared names), `'limit'` (lines, columns, variables, printf values,
+  output, 200 000 steps), `'runtime'` (divide error / SIGFPE, or a variable read
+  before it has a value — gcc would show leftover memory there, not 0).
 
 Types: `int, unsigned (unsigned int), char, signed char, unsigned char, short,
 unsigned short, long, unsigned long` with C integer promotions and usual
@@ -336,10 +399,62 @@ toSigned(v, w), toUnsigned(v, w), range(w, signed) → { min, max }
   of 5 entries: 2 from the class's recent "most missed/split" taps, 2 from spec
   points taught 1–6 weeks ago, 1 new (most recently taught). Pure; the UI turns
   entries into items with `itemForSpec` / `itemForTag`.
-- **Board**: `analyzeTokens(lines) → { rows, invalid, tagCounts, completion, meanScore, study }`
+- **Board**: `analyzeTokens(text, { setCode? }) → { rows, invalid, tagCounts, completion, meanScore, study }`
   where `study` (when study tokens exist) has per-arm per-family accuracy and the
   paired within-student difference (drill family − answer-only family) with a
   95% CI and n.
+
+State API details (state owner). Days are **day numbers** (`dayNumber(date)`,
+the local calendar day counted from 1970-01-01). Store keys: `sched` (scheduler
+state), `classes` (array of class states), `sets` / `arm.<setId>` (UI's choice).
+
+```js
+// src/lib/codec.js
+encodeSet({ level, topics: ['add',…], n, seed, mode, link? }) → 'XXXXXXXXXXXXXX'   // 14 chars; seed kept to 30 bits
+decodeSet(code) → { v, level, topics, n, seed, mode, link: setId|null, setId, code }  // throws Error(friendly message)
+encodeToken({ setId, mode, g1: { right, total }, g2, arm?, tags: [tagId|index…] }) → 'XXXX-XXXX-XXXX'
+decodeToken(str) → { v, setId, mode, g1, g2, arm, tags: [tagId…], right, total, score, code } | { error }
+encodeQueue(entries) → string (Crockford chars only, CRC-checked)   // entries as in the scheduler, only
+decodeQueue(q) → entries                // { type, params, tag, due, stage, group } are read; throws Error(friendly)
+MODES = ['normal','study','delayed'], ARM_UNKNOWN = 2, ARM_NONE = 3
+// src/learn/scheduler.js — every function returns a NEW state (never mutates)
+emptyState(); dayNumber(date?); dayToDate(day); toDay(day|Date) (RangeError otherwise); itemKey(type, params)
+recordAttempt(state, { type: TYPE_ID|TYPE, params: int[] (encodeParams), correct, tag?: diagnosis tagId,
+  target?: tagId the item aimed at, group?: 'drill'|'holdout', today, review?: bool }) → state
+dueEntries(state, today) → Entry[]; activeEntries(state) → Entry[] (for encodeQueue); queueSummary(state, today) → { due, later, next: day|null }
+Entry = { key, type: TYPE_ID, params: int[], tag: tagIndex, group, stage: 0|1|2, due, miss, done: day|null, measured }
+mergeQueue(state, entries, today) → { state, added }   // skips entries whose params do not decode to the same ints, have w outside 4–16, or do not build; due capped at today + interval
+fading(state, tagId) → { collapseWhy, showWorked }; noteWorked(state, tagId) → state (after showing it)
+resetSession(state, seed) → state; isHoldout(seed, index) → bool; reviewAccuracy(state) → { drill: {right,total}, holdout: {right,total} }
+// src/learn/study.js
+FAMILY_TOPIC = { A: 'add', B: 'shift' }; studySpecs(level) → { A: specId, B: specId }
+assignArm(seed) → 0|1; feedbackFor(arm, family, mode = 'study') → 'full'|'answerOnly'
+recoverArm(tokenString, studySetId) → { arm: 0|1 } | { arm: null, error }   // studySetId (the set's link) required
+// src/learn/sets.js
+planSet(decodedSet, { arm }) → [{ i, spec, family: 'A'|'B'|null, group: 'drill'|'holdout', feedback, seed }]
+  // item: itemForSpec(slot.spec, mulberry32(slot.seed), { level }); study sets need arm 0|1
+summarizeSet(results /* per slot: { correct, tag } | null */, plan, { setId, mode, arm }) → encodeToken input
+// src/learn/starter.js
+newClass({ id, name, level }) → { v, id, name, level, taught: { specId: day }, taps: [{ day, spec, tag, result }] }
+setTaught(cls, specId, day|null) → cls; recordTap(cls, { spec, tag?, result: 'got'|'split'|'missed', date: Date|day }) → cls
+buildStarter(cls, today, rng) → 5 × { source, spec, tag?, note }   // note: one short line for the teacher
+// src/learn/board.js
+rows: [{ line, code, setId, mode, g1, g2, arm, tags, right, total, score, dupOf: line|null }]
+invalid: [{ line, text, error }]; tagCounts: [{ tag, index, label, count, of }]  (count = codes listing the tag)
+completion: { codes, unique, duplicates, sets: [{ setId, count }], expected: n|null, finished: count|null }
+study: null | { study: Block|null, delayed: Block|null }
+Block = { n, unknownArm, arms: [{ arm, n, A: {right,total,acc}, B: {…} }] (arm 0, 1),
+          diff: { n, mean, sd, se, df, lo, hi, dz, reading: 'invest'|'replicate'|'stop'|null,
+                  noInterval: null|'tooFew'|'noSpread'|'oneArm' } | null }
+  // diff = AB/BA crossover estimate (study.js crossoverStats): mean = average of the two arms'
+  // mean (drill − answer-only) differences, so an easier family cannot bias it; sd = pooled
+  // within-arm SD, df = n − 2. lo/hi/dz are null when noInterval is set (one arm empty,
+  // df < 1, or every difference equal).
+  // reading uses dz = mean / sd: ≥ 0.3 invest, < 0.1 stop, otherwise replicate; null when n < 10
+  // also: set (decoded setCode) | null, setError | null. Duplicates are flagged (dupOf) but still
+  // counted: two learners with the same results get the same code.
+toCsv(result) → string (RFC 4180, CRLF; cells starting = + - @ are prefixed with ')
+```
 
 ## UI contract
 
@@ -391,6 +506,34 @@ bitRow(opts) / addGrid(item, opts) — keyboard: 0/1 type, arrows move, Backspac
 // src/ui/parts.js
 confidence(onChange), chip(text), button(label, opts), statusGlyph(status), keyHint(...)
 ```
+
+### Built UI modules you can reuse (foundations owns these files — import, don't edit)
+
+```js
+// src/ui/runner.js
+mountItem(el, item, opts)            // see above; opts.showSpec (default true), opts.variants (false hides "Try one like it"), opts.nextLabel
+checkpointInput(cp, onChange) → { el, focus(), disable() }   // renders a Checkpoint's input
+parseWhole(text) → number | BigInt | null;  sameValue(a, b) → bool (BigInt-safe, arrays)
+workedExample(tagInfo, item) → element;  moduleFor(item) → item-type module
+// src/ui/session.js
+runSession(holder, { total, seed, level, next(i, state) → { item, review?, group?, target? } | null, again(), endTitle?, againLabel?, showSpec? }) → { dispose() }
+loadSched(), saveSched(state), reviewLink(state) → url | '', formatDay(day) → 'Tue 29 Sep'
+// src/ui/why.js
+renderWhy(el, layers, { level, startOpen, onDepth, firstLabel }) → { destroy, openNext, depth };  renderLayer(layer) → element
+hexOf(v, width), signedOf(v, width)
+// src/ui/bitgrid.js
+bitRow(w, { values, label, dir, optionalIndex, onChange, cellLabel }) → { el, cells, focusStart(), lock(statuses, key) }
+bitInput({ label, value, optional, onSet, onMove, small }); addGrid(item, answer, opts); enableGridNav(container)
+// src/ui/parts.js
+button, chip, seg, confidence, CONFIDENCE, statusGlyph, callout, copyBox, bitsText, keyHint, tile
+// src/ui/nav.js
+setNav('#/teacher')                  // marks the current top-nav link
+```
+
+Files owned by foundations: `css/core.css`, `css/why.css`, `css/item.css`,
+`src/main.js`, `src/lib/{dom,store,rng}.js`, `src/learn/{tagids,spec,catalogue}.js`,
+`src/ui/{parts,why,bitgrid,runner,session,nav}.js`,
+`src/ui/views/{home,practice,check,review}.js`.
 
 ## CSS kit (`css/core.css`)
 

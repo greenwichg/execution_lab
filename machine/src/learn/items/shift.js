@@ -4,7 +4,7 @@
 // other fill, other amount) and naming the first one that matches exactly.
 import { shiftBits, toBits, fromBits } from '../../engine/bits.js';
 import { randInt, pick, chance } from '../../lib/rng.js';
-import { withLevel, levelCode, levelFrom, clampW, popcount, sameBits, binStr, aWidth, num, count, cap } from './add.js';
+import { withLevel, levelCode, levelFrom, clampW, popcount, sameBits, binStr, num, count, cap } from './add.js';
 
 export const TYPE = 'shift';
 export const TYPE_ID = 1;
@@ -19,6 +19,8 @@ const fmt = (v) => num(Number(v.toFixed(4)));
 
 /** value of a bit pattern the way this item reads it */
 const valueOf = (bits, kind) => fromBits(bits, { signed: kind === 'arithmetic' });
+/** '8 bits', or '8-bit two's complement' when the item reads values as signed */
+const fits = (w, kind) => (kind === 'arithmetic' ? `${w}-bit two's complement` : `${w} bits`);
 
 function levelOf(params) {
   return params.level || (params.kind === 'arithmetic' ? 'alevel' : 'gcse');
@@ -54,16 +56,18 @@ function arithLogicalApplies(params) {
 function candidates(params) {
   const { w, x, dir, k, kind } = params;
   const X = toBits(x, w);
-  const list = [
-    { tag: 'shift_kept_bits', bits: rotate(X, w, dir, k) },
-    { tag: 'shift_direction', bits: shiftBits(X, w, other(dir), k, kind).bits },
-  ];
+  const list = [];
+  // Arithmetic vs logical first: when the lost bits all equal the other fill,
+  // a rotate looks identical, and mixing up the two shifts is far likelier.
   if (arithLogicalApplies(params)) {
     list.push({ tag: 'shift_arith_logical', bits: shiftBits(X, w, dir, k, kind === 'arithmetic' ? 'logical' : 'arithmetic').bits });
   }
+  list.push({ tag: 'shift_kept_bits', bits: rotate(X, w, dir, k) });
+  list.push({ tag: 'shift_direction', bits: shiftBits(X, w, other(dir), k, kind).bits });
   list.push({ tag: 'shift_fill', bits: wrongFill(X, w, dir, k, kind) });
-  // Nearest wrong amounts first: off by one is the usual slip.
-  const ks = [...Array(w - 1).keys()].map((j) => j + 1).filter((j) => j !== k).sort((p, q) => Math.abs(p - k) - Math.abs(q - k) || p - q);
+  // Nearest wrong amounts first: off by one is the usual slip. Beyond 2 places
+  // out, an exact match is more likely chance than a miscount, so stop there.
+  const ks = [...Array(w - 1).keys()].map((j) => j + 1).filter((j) => j !== k && Math.abs(j - k) <= 2).sort((p, q) => Math.abs(p - k) - Math.abs(q - k) || p - q);
   for (const k2 of ks) list.push({ tag: 'shift_amount', bits: shiftBits(X, w, dir, k2, kind).bits, k: k2 });
   return list;
 }
@@ -171,14 +175,13 @@ const HEADLINES = {
 };
 
 function valueDetail(params, item) {
-  const { w, dir, k } = params;
+  const { w, dir, k, kind } = params;
   const f = 2 ** k;
   const v = item.show.xValue;
   const kv = item.key.value;
   const lostOnes = item.sim.lost.filter((i) => item.show.x[i] === 1).length;
   if (dir === 'L') {
-    if (lostOnes === 0) return `${num(v)} × ${f} = ${num(v * f)} is too big for ${aWidth(w)} two's complement number, so the sign bit changed. Read the value from your bits instead: ${num(kv)}.`;
-    return `Shifting left multiplies by ${f} only when no 1s fall off the end. Here ${lostOnes === 1 ? 'a 1 fell' : `${count(lostOnes, '1')} fell`} off, so read the value from your bits instead: ${num(kv)}.`;
+    return `Shifting left multiplies by ${f} only while the answer still fits in ${fits(w, kind)}. Here ${num(v)} × ${f} = ${num(v * f)} does not fit, so read the value from your bits instead: ${num(kv)}.`;
   }
   return `Shifting right divides by ${f} exactly only when the bits that fall off are all 0. Here ${lostOnes === 1 ? 'a 1 fell' : `${count(lostOnes, '1')} fell`} off, so read the value from your bits instead: ${num(kv)}.`;
 }
@@ -190,6 +193,11 @@ export function diagnose(item, answer, marking) {
   const bits = answer.bits || [];
   const firstBad = m.firstWrong?.index ?? null;
   if (!m.cells.bits.every((s) => s === 'ok')) {
+    // Every bit given is right: the answer is unfinished, not a misconception.
+    if (!m.cells.bits.includes('bad')) {
+      return finish(null, "You haven't filled in every bit.",
+        `The bits you gave are right. The full answer is ${binStr(item.key.bits)}.`, { field: 'bits', index: firstBad });
+    }
     const full = bits.length === p.w && bits.every((b) => b === 0 || b === 1);
     const cand = full ? candidates(p).find((c) => !sameBits(c.bits, item.key.bits) && sameBits(c.bits, bits)) : null;
     const tag = cand ? cand.tag : 'other';
@@ -197,10 +205,21 @@ export function diagnose(item, answer, marking) {
     return finish(tag, HEADLINES[tag], detail, { field: 'bits', index: firstBad });
   }
   // Bits right, value wrong.
+  if (m.cells.value === 'missing') {
+    return finish(null, "You didn't give the value.",
+      `Read it from your shifted bits: ${binStr(item.key.bits)} is ${num(item.key.value)}.`, { field: 'value' });
+  }
   const myth = mythValues(p).some((v) => sameValue(answer.value, v) && !sameValue(v, item.key.value));
   if (myth) return finish('shift_value_myth', 'Your bits are right, but the value is not.', valueDetail(p, item), { field: 'value' });
+  // A signed pattern read as unsigned: the top bit counted as +2^(w−1).
+  // (After the myth check: 64 × 2 = 128 is also the unsigned reading of 10000000.)
+  const unsigned = fromBits(item.key.bits);
+  if (p.kind === 'arithmetic' && answer.value === unsigned && unsigned !== item.key.value) {
+    return finish('twos_msb_positive', 'Your bits are right, but you read the top bit as positive.',
+      `In two's complement the top bit is worth ${num(-(2 ** (p.w - 1)))}, not +${2 ** (p.w - 1)}. So ${binStr(item.key.bits)} is ${num(item.key.value)}, not ${unsigned}.`, { field: 'value' });
+  }
   return finish('other', 'Your bits are right, but the value is not.',
-    `Read the value straight from your shifted bits: ${binStr(item.key.bits)} is ${item.key.value}. Add up the place values of the 1s.`, { field: 'value' });
+    `Read the value straight from your shifted bits: ${binStr(item.key.bits)} is ${num(item.key.value)}. Add up the place values of the 1s${p.kind === 'arithmetic' ? ', with the top bit counting as negative' : ''}.`, { field: 'value' });
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +228,7 @@ export function diagnose(item, answer, marking) {
 
 const NOTES = {
   shift_kept_bits: ['Bits that go past the end of the register are lost, not wrapped round.', 'Wrapping round is a different operation, called a rotate.'],
-  shift_direction: ['Left means towards the bigger place values, so a left shift makes a number bigger.', 'Right means towards the 1s column.'],
+  shift_direction: ['Left means towards the bigger place values, so a left shift usually makes a number bigger.', 'Right means towards the 1s column.'],
   shift_arith_logical: ['An arithmetic right shift copies the sign bit into the gap, so a negative number stays negative.', 'A logical shift always fills with 0s.'],
   shift_fill: ['A logical shift always fills the gap with 0s.', 'Only an arithmetic right shift copies the sign bit instead.'],
   shift_amount: ['Count the gap: after a shift of k places it is exactly k bits wide.', 'Every bit moves the same number of places.'],
@@ -222,13 +241,18 @@ function valueLayer(item) {
   const kv = valueOf(item.key.bits, kind);
   const say = [];
   if (dir === 'L') {
-    if (kv === v * f) say.push(`Shifting left ${places(k)} multiplies by ${f}: ${num(v)} × ${f} = ${num(kv)}.`, 'This works here because no 1s fell off the end.');
-    else say.push(`Shifting left usually multiplies by ${f}, but ${num(v)} × ${f} = ${num(v * f)} does not fit in ${w} bits.`, `The bits that fell off leave ${num(kv)}.`);
+    const lostOnes = item.sim.lost.filter((i) => item.show.x[i] === 1).length;
+    if (kv === v * f) {
+      say.push(`Shifting left ${places(k)} multiplies by ${f}: ${num(v)} × ${f} = ${num(kv)}.`,
+        lostOnes ? 'The 1s that fell off were copies of the sign bit, so the answer still fits.' : 'This works here because no 1s fell off the end.');
+    } else {
+      say.push(`Shifting left usually multiplies by ${f}, but ${num(v)} × ${f} = ${num(v * f)} does not fit in ${fits(w, kind)}.`, `The bits that are left give ${num(kv)}.`);
+    }
   } else {
     const exact = v / f;
     if (Number.isInteger(exact) && exact === kv) say.push(`Shifting right ${places(k)} divides by ${f}: ${num(v)} ÷ ${f} = ${num(kv)}.`, 'This is exact because only 0s fell off the end.');
     else if (v < 0) say.push(`${num(v)} ÷ ${f} = ${fmt(exact)}, and an arithmetic shift rounds down (towards minus infinity).`, `So the result is ${num(kv)}.`);
-    else say.push(`${num(v)} ÷ ${f} = ${fmt(exact)}, but the 1s that fell off the end were the remainder.`, `So the shift rounds down and gives ${num(kv)}.`);
+    else say.push(`${num(v)} ÷ ${f} = ${fmt(exact)}, but the bits that fell off the end held the remainder.`, `So the shift rounds down and gives ${num(kv)}.`);
   }
   return { id: 'value', kind: 'text', title: 'What happens to the value', say, data: {} };
 }
@@ -240,7 +264,7 @@ export function why(item, diagnosis) {
   const lostOnes = s.lost.filter((i) => X[i] === 1).length;
   const end = dirWord(dir);
   const fillWords = dir === 'R' && kind === 'arithmetic' ? `copies of the sign bit (${s.fill})` : `${s.fill}s`;
-  const lostSay = lostOnes === 0
+  const lostSay = k === 0 ? 'No bits are pushed off the end.' : lostOnes === 0
     ? `The bit${k === 1 ? '' : 's'} pushed off the ${end} end ${k === 1 ? 'is a 0' : 'are all 0s'}, so nothing is lost.`
     : `${lostOnes === 1 ? 'A 1 is' : `${cap(count(lostOnes, '1'))} are`} pushed off the ${end} end and lost for good.`;
   const layers = [{
@@ -311,6 +335,8 @@ export function generate(rng, opts = {}) {
     let x = pattern(rng, w);
     // Arithmetic right shifts are only interesting on negative numbers half the time.
     if (target === 'shift_arith_logical' || (kind === 'arithmetic' && dir === 'R' && chance(rng, 0.6))) x |= 2 ** (w - 1);
+    // Setting the sign bit can leave almost all 1s, which shifts to a dull all-1s answer.
+    if (popcount(toBits(x, w)) > w - 2) continue;
     const askValue = target === 'shift_value_myth' ? true : typeof opts.askValue === 'boolean' ? opts.askValue : chance(rng, 0.5);
     const params = withLevel({ w, x, dir, k, kind, askValue }, level);
     if (avoid && avoid.x === x && avoid.dir === dir && avoid.k === k) continue;
@@ -334,6 +360,7 @@ export function encodeParams(p) {
 }
 
 export function decodeParams(ints) {
-  const [w, x, dir, k, kind, askValue, lv] = ints;
-  return withLevel({ w, x, dir: DIRS[dir] || 'L', k, kind: KINDS[kind] || 'logical', askValue: !!askValue }, levelFrom(lv));
+  const [w0, x, dir, k, kind, askValue, lv] = ints;
+  const w = clampW(w0, 4, 16, 8);   // untrusted links: keep every number in range
+  return withLevel({ w, x: clampW(x, 0, 2 ** w - 1, 1), dir: DIRS[dir] || 'L', k: clampW(k, 1, w, 1), kind: KINDS[kind] || 'logical', askValue: !!askValue }, levelFrom(lv));
 }

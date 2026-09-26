@@ -35,7 +35,7 @@ export function mountItem(el, item, opts = {}) {
 
   const spec = specById(item.spec);
   const head = h('div', { class: 'item-head row spread' },
-    spec ? chip(specLabel(spec)) : h('span'),
+    spec && opts.showSpec !== false ? chip(specLabel(spec)) : h('span'),
     opts.progress ? h('span', { class: 'item-progress muted small' }, opts.progress) : null);
   const prompt = h('h2', { class: 'item-prompt' }, item.prompt);
   const before = h('div', { class: 'item-before' });
@@ -69,6 +69,7 @@ export function mountItem(el, item, opts = {}) {
     }
     marking = mod.mark(item, answer);
     controls.lock(marking, item.key);
+    root.classList.add('locked-grid');
     confBox.setDisabled(true);
     checkBtn.remove();
     checkHint.remove();
@@ -269,9 +270,10 @@ function fieldControl(f, item, answer) {
     return {
       el, focus: () => segs[names[0]].el.querySelector('button')?.focus(),
       lock(st, key) {
-        names.forEach((n) => {
+        names.forEach((n, idx) => {
           segs[n].setDisabled(true);
-          const s1 = st && typeof st === 'object' && !Array.isArray(st) ? st[n] : st;
+          // items report flag statuses as an array in the field's flag order
+          const s1 = Array.isArray(st) ? st[idx] : st && typeof st === 'object' ? st[n] : st;
           markNote(notes[n], s1, key?.[n], String);
         });
       },
@@ -282,12 +284,7 @@ function fieldControl(f, item, answer) {
   const input = multiline
     ? h('textarea', { class: 'mono', rows: String(f.rows || 3), 'aria-label': f.label, spellcheck: 'false' })
     : h('input', { type: 'text', inputmode: f.kind === 'number' ? 'numeric' : 'text', 'aria-label': f.label, class: f.kind === 'number' ? 'num-in' : 'mono', autocomplete: 'off', spellcheck: 'false' });
-  input.addEventListener('input', () => {
-    if (f.kind === 'number') {
-      const t = input.value.trim().replace(/[−–]/g, '-');
-      answer[f.id] = /^-?\d+$/.test(t) ? Number(t) : null;
-    } else answer[f.id] = input.value;
-  });
+  input.addEventListener('input', () => { answer[f.id] = f.kind === 'number' ? parseWhole(input.value) : input.value; });
   const note = h('span', { class: 'field-note' });
   const el = h('div', { class: ['field', `field-${f.kind}`] }, h('label', { class: 'field-label' }, f.label, input), note);
   return {
@@ -304,7 +301,7 @@ function markNote(note, status, key, fmt) {
 }
 
 // ------------------------------------------------------------------ checkpoints
-function checkpointInput(cp, onChange) {
+export function checkpointInput(cp, onChange) {
   const kind = cp.input?.kind;
   if (kind === 'bit' || kind === 'choice') {
     const choices = kind === 'bit' ? [0, 1] : cp.input.choices;
@@ -318,12 +315,22 @@ function checkpointInput(cp, onChange) {
     return { el: row.el, focus: () => row.focusStart(), disable: () => row.lock([], []) };
   }
   const input = h('input', { type: 'text', inputmode: 'numeric', class: 'num-in', 'aria-label': cp.prompt, autocomplete: 'off' });
-  input.addEventListener('input', () => { const t = input.value.trim().replace(/[−–]/g, '-'); onChange(/^-?\d+$/.test(t) ? Number(t) : null); });
+  input.addEventListener('input', () => onChange(parseWhole(input.value)));
   return { el: input, focus: () => input.focus(), disable: () => { input.readOnly = true; } };
 }
 
-function sameValue(a, b) {
-  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
+/** '−37' → -37; beyond ±2^53 a BigInt so 64-bit values stay exact; otherwise null */
+export function parseWhole(text) {
+  const t = String(text).trim().replace(/[−–]/g, '-').replace(/[\s,_]/g, '');
+  if (!/^-?\d+$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isSafeInteger(n) ? n : BigInt(t);
+}
+
+export function sameValue(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameValue(x, i < b.length ? b[i] : undefined));
+  const num = (x) => typeof x === 'number' || typeof x === 'bigint';
+  if (num(a) && num(b)) return String(a) === String(b);
   return a === b;
 }
 function showValue(v, input) {
@@ -346,4 +353,4 @@ function workedExample(tagInfo, item) {
 
 const seededRng = (item) => mulberry32(hashStr(`${item.type}|${JSON.stringify(item.params)}`));
 
-export { bitInput };
+export { bitInput, workedExample };

@@ -135,7 +135,7 @@ export function addGrid(item, answer, { carriesField = 'carries', resultField = 
   const colOf = (i) => 2 + (w - i);         // i = w is the extra left column
   // row 1: bit numbers
   for (let i = w - 1; i >= 0; i--) place(h('span', { class: 'ag-idx', 'aria-hidden': 'true' }, String(i)), colOf(i), 1);
-  place(h('span', { class: 'ag-label small muted' }, asksCarries ? 'carries' : ''), 1, 2);
+  place(h('span', { class: 'ag-label small muted' }, asksCarries ? 'carry' : ''), 1, 2);
   // row 2: carries (carry INTO column i sits above column i; carries[w] above the extra column)
   const carryCells = [];
   if (asksCarries) {
@@ -189,7 +189,10 @@ export function addGrid(item, answer, { carriesField = 'carries', resultField = 
   }
   enableGridNav(grid);
   const summary = h('p', { class: 'visually-hidden' }, `${item.show.op === '-' ? 'Subtract' : 'Add'} ${bitsMsb(item.show.a)} ${item.show.op === '-' ? 'minus' : 'plus'} ${bitsMsb(item.show.b)}. Type the result from bit 0 (the right-hand end)${asksCarries ? ', and each carry above the column it goes into' : ''}.`);
-  const el = h('div', { class: 'addgrid-wrap' }, summary, grid);
+  const hint = h('p', { class: 'grid-hint small muted' }, asksCarries
+    ? 'Type 0 or 1, starting at the right. After each bit the cursor jumps to the carry it makes — type 1, or 0 for no carry. Arrow keys move around.'
+    : 'Type 0 or 1, starting at the right; the cursor moves left. Arrow keys move around.');
+  const el = h('div', { class: 'addgrid-block' }, h('div', { class: 'addgrid-wrap' }, summary, grid), hint);
   return {
     el,
     focusStart() { resultCells[0].input.focus(); },

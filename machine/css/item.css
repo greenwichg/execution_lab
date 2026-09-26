@@ -14,7 +14,7 @@
 .addgrid-wrap { overflow-x: auto; padding: 10px 2px 4px; }
 .addgrid {
   display: grid; align-items: center; justify-items: center;
-  grid-template-columns: 2.2rem repeat(var(--cols), var(--cellw)) minmax(3.2rem, auto);
+  grid-template-columns: max-content repeat(var(--cols), var(--cellw)) minmax(3.2rem, auto);
   column-gap: 5px; row-gap: 4px; width: max-content;
 }
 .ag-idx { font: 500 .68rem/1 var(--mono); color: var(--muted); align-self: end; }
@@ -24,26 +24,28 @@
 .ag-value { justify-self: start; padding-left: 8px; font-size: .9rem; white-space: nowrap; }
 .ag-rule { align-self: start; justify-self: stretch; height: 0; border-top: 2px solid var(--ink); margin-top: -3px; pointer-events: none; }
 .ag-res { margin-top: 6px; }
+.grid-hint { margin-top: 6px; max-width: 60ch; }
+.item.locked-grid .grid-hint { display: none; }
 
 /* ---------- one bit cell ---------- */
 .bit-cell { position: relative; display: inline-grid; justify-items: center; }
-.bit-in {
-  width: var(--cellw); height: var(--cellh); padding: 0;
+.bit-cell input.bit-in {
+  width: var(--cellw); height: var(--cellh); min-height: 0; padding: 0;
   border: 1.5px solid var(--line-strong); border-radius: 8px; background: var(--paper);
   font: 600 1.45rem/1 var(--mono); text-align: center; color: var(--ink); caret-color: var(--accent);
 }
-.bit-in:focus { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
-.bit-cell.small .bit-in { width: 2.05rem; height: 2.05rem; font-size: 1rem; border-style: solid; border-color: var(--line); background: var(--paper-2); }
-.bit-cell.optional .bit-in { border-style: dashed; background: transparent; }
+.bit-cell input.bit-in:focus { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+.bit-cell.small input.bit-in { width: 2.05rem; height: 2.05rem; font-size: 1rem; border-style: solid; border-color: var(--line); background: var(--paper-2); }
+.bit-cell.optional input.bit-in { border-style: dashed; background: transparent; }
 .bit-glyph { position: absolute; top: -9px; right: -7px; font-size: .78rem; background: var(--paper); border-radius: 50%; padding: 0 2px; line-height: 1.2; }
 .bit-glyph:empty { display: none; }
 .bit-under { font: 700 .82rem/1 var(--mono); color: var(--bad); min-height: .9rem; margin-top: 3px; }
 .bit-under:empty { min-height: 0; margin: 0; }
-.bit-cell.locked .bit-in { cursor: default; }
-.bit-cell.st-ok .bit-in { border-color: var(--ok); background: var(--ok-soft); }
-.bit-cell.st-bad .bit-in, .bit-cell.st-extra .bit-in { border-color: var(--bad); background: var(--bad-soft); }
-.bit-cell.st-extra .bit-in { text-decoration: line-through; }
-.bit-cell.st-missing .bit-in { border-color: var(--bad); border-style: dashed; }
+.bit-cell.locked input.bit-in { cursor: default; }
+.bit-cell.st-ok input.bit-in { border-color: var(--ok); background: var(--ok-soft); }
+.bit-cell.st-bad input.bit-in, .bit-cell.st-extra input.bit-in { border-color: var(--bad); background: var(--bad-soft); }
+.bit-cell.st-extra input.bit-in { text-decoration: line-through; }
+.bit-cell.st-missing input.bit-in { border-color: var(--bad); border-style: dashed; }
 .bitrow { display: inline-flex; gap: 5px; flex-wrap: nowrap; padding-top: 8px; }
 
 /* ---------- other fields ---------- */
@@ -90,10 +92,12 @@
 
 /* ---------- phones ---------- */
 @media (max-width: 520px) {
-  .item { --cellw: 2.1rem; --cellh: 2.45rem; }
+  .item { --cellw: 1.9rem; --cellh: 2.35rem; }
+  .ag-label.small { display: none; }            /* the small grey carry cells speak for themselves */
+  .ag-value { padding-left: 4px; font-size: .78rem; }
   .bit-in { font-size: 1.15rem; }
-  .bit-cell.small .bit-in { width: 1.8rem; height: 1.8rem; font-size: .9rem; }
-  .addgrid { grid-template-columns: 1.4rem repeat(var(--cols), var(--cellw)) minmax(2rem, auto); column-gap: 3px; }
+  .bit-cell.small input.bit-in { width: 1.8rem; height: 1.8rem; font-size: .9rem; }
+  .addgrid { grid-template-columns: max-content repeat(var(--cols), var(--cellw)) minmax(0, auto); column-gap: 3px; }
   .ag-digit { font-size: 1.15rem; height: 2rem; }
   .ag-label { font-size: 1.05rem; padding-right: 3px; }
   .bit-static { width: 2rem; height: 2.2rem; font-size: 1.1rem; }
@@ -101,5 +105,5 @@
 
 /* ---------- projector ---------- */
 body.projector .item { --cellw: 4.4rem; --cellh: 4.6rem; }
-body.projector .ag-digit, body.projector .bit-in { font-size: 2.8rem; }
+body.projector .ag-digit, body.projector .bit-cell input.bit-in { font-size: 2.8rem; }
 body.projector .ag-digit { height: 4rem; }

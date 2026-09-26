@@ -239,6 +239,7 @@ function lex(src) {
 // ----------------------------------------------------------------- parser
 
 const POINTER_MSG = `Pointers (* and &) aren't supported — ${WHAT_WORKS}`;
+const incDecInside = (t) => new CError(`Put ${t.v} on its own line (e.g. "i${t.v};") — it isn't supported inside expressions`, t.line, t.col);
 
 let nodeId = 0;
 const mk = (k, tok, o) => ({ k, id: ++nodeId, line: tok.line, col: tok.col, ...o });
@@ -314,7 +315,7 @@ function parse(src) {
       }
       return endOf(mk('un', t, { op: t.v, e }), last());
     }
-    if (t.t === 'op' && (t.v === '++' || t.v === '--')) throw new CError(`Put ${t.v} on its own line (e.g. "i${t.v};") — it isn't supported inside expressions`, t.line, t.col);
+    if (t.t === 'op' && (t.v === '++' || t.v === '--')) throw incDecInside(t);
     if (t.t === 'pu' && t.v === '(' && isTypeAt(1)) return cast();
     return postfix();
   }
@@ -328,8 +329,11 @@ function parse(src) {
   }
   function postfix() {
     const e = primary();
-    if (is('op', '++') || is('op', '--')) { const t = peek(); throw new CError(`Put ${t.v} on its own line (e.g. "i${t.v};") — it isn't supported inside expressions`, t.line, t.col); }
-    if (is('op', '=') || (peek().t === 'op' && /^[-+*/%&|^]=$|^<<=$|^>>=$/.test(peek().v))) { const t = peek(); throw new CError('Assignments go on their own line here (e.g. "x = x + 1;")', t.line, t.col); }
+    const t = peek();
+    if (is('op', '++') || is('op', '--')) throw incDecInside(t);
+    if (t.t === 'op' && (t.v === '=' || /^[-+*/%&|^]=$|^<<=$|^>>=$/.test(t.v))) {
+      throw new CError('Assignments go on their own line here (e.g. "x = x + 1;")', t.line, t.col);
+    }
     return e;
   }
   function primary() {
@@ -338,7 +342,9 @@ function parse(src) {
     if (t.t === 'id') {
       next();
       if (is('pu', '(')) {
-        throw new CError(t.v === 'printf' ? 'printf can only be used as a statement on its own here' : `Calling functions like ${t.v}() isn't supported — only printf and main`, t.line, t.col);
+        const msg = t.v === 'printf' ? 'printf can only be used as a statement on its own here'
+          : `Calling functions like ${t.v}() isn't supported — only printf and main`;
+        throw new CError(msg, t.line, t.col);
       }
       return endOf(mk('var', t, { name: t.v }), t);
     }
@@ -371,8 +377,15 @@ function parse(src) {
     const text = fmt.v.split('\0')[0];         // printf stops at a \0 byte
     const conv = (text.match(FMT_RE) || []).filter((s) => s !== '%%').length;
     const bad = text.replace(FMT_RE, '').match(/%.?/);
-    if (bad) throw new CError(`printf here supports %d %i %u %x %X %o %c %% with hh, h or l (like %hhd, %lu) — not ${bad[0]}`, fmt.line, fmt.col);
-    if (conv !== args.length) throw new CError(`The format string has ${conv} placeholder${conv === 1 ? '' : 's'} but ${args.length} value${args.length === 1 ? '' : 's'} follow${args.length === 1 ? 's' : ''}`, fmt.line, fmt.col);
+    if (bad && !/%[A-Za-z0-9.#+ -]/.test(bad[0])) throw new CError('To print a % sign, write %% in the format string', fmt.line, fmt.col);
+    if (bad) {
+      const shown = JSON.stringify(bad[0]).slice(1, -1);
+      throw new CError(`printf here supports %d %i %u %x %X %o %c %% with hh, h or l (like %hhd, %lu) — not ${shown}`, fmt.line, fmt.col);
+    }
+    if (conv !== args.length) {
+      const n = args.length;
+      throw new CError(`The format string has ${conv} placeholder${conv === 1 ? '' : 's'} but ${n} value${n === 1 ? '' : 's'} follow${n === 1 ? 's' : ''}`, fmt.line, fmt.col);
+    }
     if (args.length > 5) throw new CError('printf here takes at most 5 values', fmt.line, fmt.col, 'limit');
     return endOf(mk('printf', t, { fmt: text, fmtText: fmt.text, args }), last());
   }
@@ -400,6 +413,14 @@ function parse(src) {
     const e = expr();
     throw new CError(inFor ? 'Expected an assignment here' : 'This expression doesn\'t do anything on its own — assign it to a variable or print it', e.line, e.col);
   }
+  /** the body of if / else / while / for: C only allows a statement there, not a declaration */
+  function bodyStmt() {
+    if (isTypeAt()) {
+      const t = peek();
+      throw new CError('A declaration can\'t be the whole body of if, else, while or for — put it inside { }', t.line, t.col);
+    }
+    return stmt();
+  }
   function stmt() {
     const t = peek();
     if (is('pu', '{')) return block();
@@ -408,16 +429,16 @@ function parse(src) {
       next(); want('pu', '(');
       const c = expr();
       want('pu', ')');
-      const th = stmt();
+      const th = bodyStmt();
       let el = null;
-      if (is('kw', 'else')) { next(); el = stmt(); }
+      if (is('kw', 'else')) { next(); el = bodyStmt(); }
       return mk('if', t, { c, t: th, f: el, endLine: c.endLine });
     }
     if (is('kw', 'while')) {
       next(); want('pu', '(');
       const c = expr();
       want('pu', ')');
-      return mk('while', t, { c, body: stmt(), endLine: c.endLine });
+      return mk('while', t, { c, body: bodyStmt(), endLine: c.endLine });
     }
     if (is('kw', 'for')) {
       next(); want('pu', '(');
@@ -427,7 +448,7 @@ function parse(src) {
       want('pu', ';');
       const step = is('pu', ')') ? null : simple(true);
       want('pu', ')');
-      return mk('for', t, { init, c, step, body: stmt(), endLine: t.line });
+      return mk('for', t, { init, c, step, body: bodyStmt(), endLine: t.line });
     }
     if (is('kw', 'return')) {
       next();
@@ -605,7 +626,8 @@ export function text(ins, labelAddr) {
 function checkSize(lines) {
   if (lines.length > LIMITS.lines) throw new CError(`This program has ${lines.length} lines — the limit here is ${LIMITS.lines}`, LIMITS.lines + 1, 1, 'limit');
   lines.forEach((l, k) => {
-    if (l.length > LIMITS.cols) throw new CError(`Line ${k + 1} is ${l.length} characters long — keep each line to ${LIMITS.cols} or fewer`, k + 1, LIMITS.cols + 1, 'limit');
+    if (l.length <= LIMITS.cols) return;
+    throw new CError(`Line ${k + 1} is ${l.length} characters long — keep each line to ${LIMITS.cols} or fewer`, k + 1, LIMITS.cols + 1, 'limit');
   });
 }
 
@@ -1127,6 +1149,7 @@ export function run(prog, o = {}) {
   const steps = [];
   let curStep = null;
   const varVals = new Map();
+  const hasValue = new Set();                     // ids of variables written at least once
   const aluLog = new Map();
   const events = trace ? [] : undefined;
   let eventsTruncated = false;
@@ -1164,7 +1187,15 @@ export function run(prog, o = {}) {
 
   // ---- operands ----
   const val = (x, w) => {
-    if (isMem(x)) return rdMem(rbp + x.d, x.w);
+    if (isMem(x)) {
+      // gcc leaves a local without an initialiser holding whatever was in that memory, so there is
+      // no honest value to show: stop rather than pretend C sets it to 0
+      const vr = slotVar.get(x.d);
+      if (vr && !hasValue.has(vr.id)) {
+        throw new CError(`"${vr.name}" is used before it has been given a value. In C it holds whatever was left in that memory (not 0), so this lab stops here.`, insts[ip].line, 1, 'runtime');
+      }
+      return rdMem(rbp + x.d, x.w);
+    }
     if (typeof x === 'string') return rdReg(x);
     return BigInt.asUintN(w, BigInt(x));           // immediates are sign-extended to the operand width
   };
@@ -1174,6 +1205,7 @@ export function run(prog, o = {}) {
     v &= MASK[x.w];
     wrMem(rbp + x.d, x.w, v);
     const vr = slotVar.get(x.d);
+    if (vr) hasValue.add(vr.id);
     write = { d: x.d, width: x.w, val: v, v: vr ? vr.id : undefined };
     if (vr && vr.size * 8 === x.w) {
       const cv = cValue(v, x.w, vr.ctype.signed);
@@ -1206,12 +1238,12 @@ export function run(prog, o = {}) {
   // ---- ALU operation record (for events and aluLog) ----
   let op3 = null;
   const logAlu = (ins, a, b, r, w, extra = {}) => {
-    op3 = { a, b, r, width: w, ...extra };
+    op3 = b === null ? { a, r, width: w, ...extra } : { a, b, r, width: w, ...extra };
     if (!ins.alu) return;
     let e = aluLog.get(ins.i);
     if (!e) { e = { i: ins.i, n: 0, first: null, last: [] }; aluLog.set(ins.i, e); }
     const s = ins.alu.signed;
-    const rec = { a: cValue(a, w, s), b: cValue(b, w, s), r: cValue(r, w, s), flags: { ...F }, step: steps.length - 1, n: e.n, width: w, signed: s };
+    const rec = { a: cValue(a, w, s), b: b === null ? null : cValue(b, w, s), r: cValue(r, w, s), flags: { ...F }, step: steps.length - 1, n: e.n, width: w, signed: s };
     if (!e.first) e.first = rec;
     e.last.push(rec);
     if (e.last.length > 3) e.last.shift();
@@ -1312,7 +1344,7 @@ export function run(prog, o = {}) {
       }
       case 'idiv': case 'div': divide(ins, op === 'idiv'); break;   // flags are undefined; left unchanged
       case 'neg': { const w = widthOf(a), x = val(a, w), r = (0n - x) & MASK[w]; flagsSub(0n, x, r, w); logAlu(ins, 0n, x, r, w); store(a, r); break; }
-      case 'not': { const w = widthOf(a), x = val(a, w), r = ~x & MASK[w]; logAlu(ins, x, 0n, r, w); store(a, r); break; }
+      case 'not': { const w = widthOf(a), x = val(a, w), r = ~x & MASK[w]; logAlu(ins, x, null, r, w); store(a, r); break; }
       case 'shl': case 'shr': case 'sar': shift(ins); break;
       case 'set': wrReg('al', cond(ins.cc) ? 1n : 0n); break;
       case 'lea_fmt': regs[7] = BigInt(0x402004 + ins.str * 16); break;   // a stand-in .rodata address

@@ -74,6 +74,7 @@ const RENDER = {
 
   columns(d) {
     const w = d.w, sub = d.op === '-';
+    const base = d.base || 0;                 // register bit number of column 0 (cards show bits 31–24)
     const carries = d.carries || [];
     const lost = !!d.dropped && carries[w] === 1;
     const cols = w + 1;
@@ -85,23 +86,24 @@ const RENDER = {
       grid.appendChild(h('span', { class: ['c-right', cls] }, right || ''));
     };
     // bit numbers
-    row('', [cell('', 'idx', w), ...range(w).map((i) => cell(String(i), 'idx', i))], '', 'idx-row');
+    row('', [cell('', 'idx', w), ...range(w).map((i) => cell(String(base + i), 'idx', i))], '', 'idx-row');
     // carries: carries[i] sits above column i; carries[w] above the extra column
     row('carry', [
       cell(carries[w] === 1 ? '1' : '', ['carry', 'out'], w),
       ...range(w).map((i) => cell(carries[i] === 1 ? '1' : '', ['carry', i === 0 && 'cin'], i)),
-    ], sub && carries[0] === 1 ? '+1' : '', 'carry-row');
+    ], carries[0] === 1 ? (base ? `from bit ${base - 1}` : sub ? '+1' : '') : '', 'carry-row');
     row('', [cell('', null, w), ...range(w).map((i) => cell(String(d.a[i] ?? ''), 'bit', i))], d.labels?.a, 'a-row');
     row(sub ? '+¬' : '+', [cell('', null, w), ...range(w).map((i) => cell(String(d.b[i] ?? ''), 'bit', i))], d.labels?.b, 'b-row');
     row('', [
       cell(lost ? '1' : carries[w] === 1 && d.result?.length > w ? '1' : '', [lost ? 'lost' : 'bit', 'res'], w),
       ...range(w).map((i) => cell(String(d.result?.[i] ?? ''), ['bit', 'res'], i)),
     ], d.labels?.r, 'r-row');
-    const summary = `${d.labels?.a ?? bitStr(d.a)} ${sub ? 'minus' : 'plus'} ${d.labels?.b ?? bitStr(d.b)} in ${w} bits gives ${bitStr(d.result || [])}${lost ? '; the carry out of the top column is lost' : ''}.`;
+    const summary = `${d.labels?.a ?? bitStr(d.a)} ${sub ? 'minus' : 'plus'} ${d.labels?.b ?? bitStr(d.b)}${base ? `, bits ${base + w - 1} to ${base}` : ` in ${w} bits`}: result ${bitStr(d.result || [])}${lost ? '; the carry out of the top column is lost' : ''}.`;
     return h('div', { class: 'cols', role: 'img', 'aria-label': summary },
       grid,
-      lost ? h('p', { class: 'cols-note small' }, h('span', { class: 'lost-mark', 'aria-hidden': 'true' }, '1'), ` lost — it was worth ${2 ** w}, but there is no bit ${w} to keep it.`) : null,
-      sub ? h('p', { class: 'cols-note small muted' }, 'Subtraction is done as an addition: invert every bit of the second number (¬) and add 1.') : null);
+      lost ? h('p', { class: 'cols-note small' }, h('span', { class: 'lost-mark', 'aria-hidden': 'true' }, '1'), ` lost — it was worth ${(2n ** BigInt(base + w)).toLocaleString('en-GB')}, but there is no bit ${base + w} to keep it.`) : null,
+      base ? h('p', { class: 'cols-note small muted' }, `Only the top ${w} bits (${base + w - 1}–${base}) are shown; the carry into bit ${base} comes up from the bits below.`) : null,
+      sub ? h('p', { class: 'cols-note small muted' }, base ? 'Subtraction is done as an addition: every bit of the second number is inverted (¬) and 1 is added at bit 0.' : 'Subtraction is done as an addition: invert every bit of the second number (¬) and add 1.') : null);
   },
 
   column(d) {

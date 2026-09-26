@@ -114,9 +114,13 @@ function placeSum(n, w) {
   return `${num(-M)} + ${n + M}`;
 }
 
-function encodeDiagnosis(item, answer) {
+function encodeDiagnosis(item, answer, m) {
   const { w, n } = item.params;
   const bits = answer.bits || [];
+  if (!m.cells.bits.includes('bad')) {
+    return finish(null, "You haven't filled in every bit.",
+      `The bits you gave are right. ${num(n)} in ${w}-bit two's complement is ${binStr(item.key.bits)}.`, { field: 'bits', index: m.firstWrong?.index ?? w - 1 });
+  }
   const full = bits.length === w && bits.every((b) => b === 0 || b === 1);
   const focus = { field: 'bits', index: w - 1 };
   const kb = binStr(item.key.bits);
@@ -142,7 +146,13 @@ function decodeDiagnosis(item, answer) {
   const M = 2 ** (w - 1);
   const b = binStr(toBits(n, w));
   const focus = { field: 'value' };
-  if (n < 0 && typeof v === 'number') {
+  if (typeof v !== 'number' || Number.isNaN(v)) {
+    return finish(null, "You didn't give a value.",
+      n < 0
+        ? `The top bit is 1, so the number is negative: ${b} = ${placeSum(n, w)} = ${num(n)}.`
+        : `The top bit is 0, so ${b} is positive and reads like ordinary binary: ${n}.`, focus);
+  }
+  if (n < 0) {
     if (v === readAs('twos_msb_positive', n, w)) {
       return finish('twos_msb_positive', 'You read the top bit as a positive place value.',
         `You counted the top bit as +${M}, which reads the bits as an unsigned number. In two's complement it is worth ${num(-M)}, so ${b} = ${placeSum(n, w)} = ${num(n)}.`, focus);
@@ -157,7 +167,7 @@ function decodeDiagnosis(item, answer) {
         `Inverting gives ${binStr(inv)} = ${-n - 1}, and you need to add 1 to get the size, ${-n}. So the value is ${num(n)}, not ${num(v)}.`, focus);
     }
   }
-  return finish('other', typeof v === 'number' ? `The value is ${num(n)}, not ${num(v)}.` : 'You did not give a value.',
+  return finish('other', `The value is ${num(n)}, not ${num(v)}.`,
     n < 0
       ? `The top bit is 1, so the number is negative and worth ${placeSum(n, w)} = ${num(n)}. Invert and add 1 to check its size.`
       : `The top bit is 0, so ${b} is positive and reads like ordinary binary: ${n}.`, focus);
@@ -166,17 +176,20 @@ function decodeDiagnosis(item, answer) {
 function rangeDiagnosis(item, answer) {
   const { w } = item.params;
   const M = 2 ** (w - 1);
-  const bad = [answer.min, answer.max].some((x) => typeof x === 'number');
+  const given = (x) => typeof x === 'number' && !Number.isNaN(x);
+  // Only a value the learner actually gave can show a wrong idea of the range.
+  const bad = (given(answer.min) && answer.min !== -M) || (given(answer.max) && answer.max !== M - 1);
   const focus = { field: item.key.min === answer.min ? 'max' : 'min' };
   const detail = `The top bit is worth ${num(-M)}, so the smallest value is ${binStr(toBits(-M, w))} = ${num(-M)}. The largest is ${binStr(toBits(M - 1, w))} = ${M - 1}, one less than ${M} because zero takes one of the patterns with a 0 on top.`;
-  return finish(bad ? 'twos_range' : 'other', `The ${w}-bit range is ${num(-M)} to ${M - 1}.`, detail, focus);
+  if (!bad) return finish(null, `You didn't give both ends of the range: it is ${num(-M)} to ${M - 1}.`, detail, focus);
+  return finish('twos_range', `The ${w}-bit range is ${num(-M)} to ${M - 1}.`, detail, focus);
 }
 
 export function diagnose(item, answer, marking) {
   const m = marking || mark(item, answer);
   if (m.correct) return finish(null, 'All correct.', 'Your answer matches the machine.', { field: item.fields[0].id });
   const { task } = item.params;
-  if (task === 'encode') return encodeDiagnosis(item, answer);
+  if (task === 'encode') return encodeDiagnosis(item, answer, m);
   if (task === 'decode') return decodeDiagnosis(item, answer);
   return rangeDiagnosis(item, answer);
 }
@@ -338,7 +351,9 @@ export function encodeParams(p) {
 }
 
 export function decodeParams(ints) {
-  const [w, n, task, lv] = ints;
-  return withLevel({ w, n: n - 2 ** (w - 1), task: TASKS[task] || 'encode' }, levelFrom(lv));
+  const [w0, n, task, lv] = ints;
+  const w = clampW(w0, 4, 16, 8);   // untrusted links: keep every number in range
+  const M = 2 ** (w - 1);
+  return withLevel({ w, n: clampW(n, 0, 2 * M - 1, M) - M, task: TASKS[task] || 'encode' }, levelFrom(lv));
 }
 
