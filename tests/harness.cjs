@@ -15,11 +15,13 @@ let server, port, browser;
 async function setup() {
   if (browser) return;
   server = http.createServer((req, res) => {
-    const f = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+    let f = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+    if (req.url.split('?')[0].endsWith('/')) f = path.join(f, 'index.html');
     if (!f.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
     fs.readFile(f, (e, d) => {
       if (e) { res.writeHead(404); res.end(); return; }
-      const type = f.endsWith('.html') ? 'text/html' : f.endsWith('.json') ? 'application/json' : 'application/octet-stream';
+      const TYPES = { '.html': 'text/html', '.json': 'application/json', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.md': 'text/markdown' };
+      const type = TYPES[path.extname(f)] || 'application/octet-stream';
       res.writeHead(200, { 'content-type': type }); res.end(d);
     });
   });
@@ -37,7 +39,7 @@ async function teardown() { await browser?.close(); server?.close(); browser = n
  */
 async function open(query = '', opts = {}) {
   await setup();
-  const { width = 1280, height = 720, isMobile = false, hasTouch = false, init, html } = opts;
+  const { width = 1280, height = 720, isMobile = false, hasTouch = false, init, html, page: pagePath = 'index.html', hash = '', ready = '#loader.done' } = opts;
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, isMobile, hasTouch });
   const page = await context.newPage();
   const errors = [], infos = [];
@@ -57,11 +59,18 @@ async function open(query = '', opts = {}) {
     });
   }
   if (init) await page.addInitScript(init);
-  await page.goto(`http://127.0.0.1:${port}/index.html${query ? `?${query}` : ''}`);
-  try { await page.waitForSelector('#loader.done', { state: 'attached', timeout: 180000 }); } catch (e) {
+  const requests = [];
+  page.on('request', (r) => requests.push(r.url()));
+  await page.goto(`http://127.0.0.1:${port}/${pagePath}${query ? `?${query}` : ''}${hash ? `#${hash}` : ''}`);
+  try { await page.waitForSelector(ready, { state: 'attached', timeout: 180000 }); } catch (e) {
     throw new Error(`lab did not finish loading: ${e.message}\n${errors.join('\n')}`);
   }
-  return { page, context, errors, infos, close: () => context.close() };
+  return { page, context, errors, infos, requests, close: () => context.close() };
+}
+
+/** open Predict the Machine (machine/index.html) at a hash route; resolves once the route has rendered */
+async function openMachine(route = '/', opts = {}) {
+  return open(opts.query || '', { ...opts, page: 'machine/index.html', hash: route, ready: opts.ready || '#app main[data-view]' });
 }
 
 const lab = (page, fn, arg) => page.evaluate(fn, arg);
@@ -82,4 +91,4 @@ async function beginWithSound(page) {
   await until(page, () => window.__lab.audio.debug().mode === 'narrated' && window.__lab.audio.debug().ctx === 'running');
 }
 
-module.exports = { setup, teardown, open, lab, until, sleep, shot, beginWithSound, ROOT, ARTIFACTS };
+module.exports = { setup, teardown, open, openMachine, port: () => port, lab, until, sleep, shot, beginWithSound, ROOT, ARTIFACTS };

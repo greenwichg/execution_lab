@@ -1,0 +1,105 @@
+/* Practice loop: item runner + bit grid (owner: UI core). */
+
+.item { --cellw: 2.7rem; --cellh: 2.9rem; }
+.item > * + * { margin-top: 18px; }
+.item-head { gap: 8px; }
+.item-prompt { font-size: clamp(1.15rem, 1rem + .6vw, 1.45rem); font-weight: 650; max-width: 60ch; }
+.item-actions { margin-top: 22px; }
+.check-hint:empty { display: none; }
+.item-feedback:empty { display: none; }
+.item-next { margin-top: 20px; }
+.neutral-line { font-weight: 600; }
+
+/* ---------- the addition grid ---------- */
+.addgrid-wrap { overflow-x: auto; padding: 10px 2px 4px; }
+.addgrid {
+  display: grid; align-items: center; justify-items: center;
+  grid-template-columns: 2.2rem repeat(var(--cols), var(--cellw)) minmax(3.2rem, auto);
+  column-gap: 5px; row-gap: 4px; width: max-content;
+}
+.ag-idx { font: 500 .68rem/1 var(--mono); color: var(--muted); align-self: end; }
+.ag-label { justify-self: end; padding-right: 6px; font: 600 1.3rem/1 var(--mono); color: var(--ink-2); }
+.ag-label.small { font: 600 .66rem/1 var(--sans); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); align-self: center; }
+.ag-digit { font: 600 1.45rem/1 var(--mono); height: 2.3rem; display: grid; place-items: center; }
+.ag-value { justify-self: start; padding-left: 8px; font-size: .9rem; white-space: nowrap; }
+.ag-rule { align-self: start; justify-self: stretch; height: 0; border-top: 2px solid var(--ink); margin-top: -3px; pointer-events: none; }
+.ag-res { margin-top: 6px; }
+
+/* ---------- one bit cell ---------- */
+.bit-cell { position: relative; display: inline-grid; justify-items: center; }
+.bit-in {
+  width: var(--cellw); height: var(--cellh); padding: 0;
+  border: 1.5px solid var(--line-strong); border-radius: 8px; background: var(--paper);
+  font: 600 1.45rem/1 var(--mono); text-align: center; color: var(--ink); caret-color: var(--accent);
+}
+.bit-in:focus { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+.bit-cell.small .bit-in { width: 2.05rem; height: 2.05rem; font-size: 1rem; border-style: solid; border-color: var(--line); background: var(--paper-2); }
+.bit-cell.optional .bit-in { border-style: dashed; background: transparent; }
+.bit-glyph { position: absolute; top: -9px; right: -7px; font-size: .78rem; background: var(--paper); border-radius: 50%; padding: 0 2px; line-height: 1.2; }
+.bit-glyph:empty { display: none; }
+.bit-under { font: 700 .82rem/1 var(--mono); color: var(--bad); min-height: .9rem; margin-top: 3px; }
+.bit-under:empty { min-height: 0; margin: 0; }
+.bit-cell.locked .bit-in { cursor: default; }
+.bit-cell.st-ok .bit-in { border-color: var(--ok); background: var(--ok-soft); }
+.bit-cell.st-bad .bit-in, .bit-cell.st-extra .bit-in { border-color: var(--bad); background: var(--bad-soft); }
+.bit-cell.st-extra .bit-in { text-decoration: line-through; }
+.bit-cell.st-missing .bit-in { border-color: var(--bad); border-style: dashed; }
+.bitrow { display: inline-flex; gap: 5px; flex-wrap: nowrap; padding-top: 8px; }
+
+/* ---------- other fields ---------- */
+.field { display: grid; gap: 8px; }
+.field-label { font-weight: 650; }
+.field-choice, .field-flags { align-items: center; }
+.field-choice { display: flex; flex-wrap: wrap; gap: 12px; }
+.field label.field-label { display: grid; gap: 8px; font-weight: 650; }
+.field-note { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.field-note .correct-was { font-family: var(--mono); font-weight: 600; color: var(--ink-2); }
+.flag-grid { display: grid; gap: 8px; }
+.flag-row { gap: 12px; }
+.flag-name { font: 700 1rem/1 var(--mono); width: 2.4em; text-decoration: none; }
+.num-in { max-width: 14rem; font-family: var(--mono); }
+.field-text textarea { max-width: 36rem; }
+.operand { gap: 12px; }
+.bits-static { display: inline-flex; gap: 4px; }
+.bit-static { display: inline-grid; place-items: center; width: 2.3rem; height: 2.5rem; border: 1px solid var(--line); border-radius: 7px; background: var(--paper-2); font: 600 1.35rem/1 var(--mono); }
+
+/* ---------- feedback ---------- */
+.checkpoint { border-left: 4px solid var(--accent); }
+.checkpoint-intro { font-weight: 700; }
+.checkpoint .row { align-items: center; }
+.worked { background: var(--paper); }
+.worked-steps { margin: 6px 0 0; padding-left: 1.3rem; }
+.worked-steps li + li { margin-top: 6px; }
+.worked-layer { margin: 8px 0; }
+
+/* ---------- session chrome ---------- */
+.session-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.progress-dots { display: inline-flex; gap: 5px; }
+.progress-dots span { width: 10px; height: 10px; border-radius: 50%; background: var(--paper-3); border: 1px solid var(--line-strong); }
+.progress-dots span.done-ok { background: var(--ok); border-color: var(--ok); }
+.progress-dots span.done-bad { background: transparent; border: 2px solid var(--bad); }
+.progress-dots span.now { outline: 2px solid var(--accent); outline-offset: 2px; }
+.calib { border-collapse: collapse; }
+.calib th, .calib td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.level-panel h2 { margin-bottom: 4px; }
+.level-panel ul { margin: 10px 0 0; padding-left: 1.1rem; }
+.level-panel li + li { margin-top: 4px; }
+.home-hero { padding: 12px 0 8px; }
+.home-hero h1 { font-size: clamp(2rem, 1.3rem + 3vw, 3.2rem); letter-spacing: -0.02em; }
+.demo-strip { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+
+/* ---------- phones ---------- */
+@media (max-width: 520px) {
+  .item { --cellw: 2.1rem; --cellh: 2.45rem; }
+  .bit-in { font-size: 1.15rem; }
+  .bit-cell.small .bit-in { width: 1.8rem; height: 1.8rem; font-size: .9rem; }
+  .addgrid { grid-template-columns: 1.4rem repeat(var(--cols), var(--cellw)) minmax(2rem, auto); column-gap: 3px; }
+  .ag-digit { font-size: 1.15rem; height: 2rem; }
+  .ag-label { font-size: 1.05rem; padding-right: 3px; }
+  .bit-static { width: 2rem; height: 2.2rem; font-size: 1.1rem; }
+}
+
+/* ---------- projector ---------- */
+body.projector .item { --cellw: 4.4rem; --cellh: 4.6rem; }
+body.projector .ag-digit, body.projector .bit-in { font-size: 2.8rem; }
+body.projector .ag-digit { height: 4rem; }
