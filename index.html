@@ -3959,7 +3959,12 @@ class AudioEngine {
     if (kind === 'fx') { this.ramp(this.fxUser.gain, g, 0.05); this.ramp(this.fxWetUser.gain, g, 0.05); }
     if (kind === 'amb') { this.ramp(this.ambMusicUser.gain, g, 0.05); this.ramp(this.musicWetUser.gain, g, 0.05); }
   }
-  setMuted(m) { this.ramp(this.master.gain, m ? 0 : 1, 0.06); }
+  setMuted(m) {
+    const g = this.master.gain, now = this.now;
+    g.cancelScheduledValues(now); g.setValueAtTime(g.value, now);
+    if (m) g.linearRampToValueAtTime(0, now + 0.08);          // true silence, not an asymptote
+    else g.setTargetAtTime(1, now, 0.06);
+  }
   level(kind) {
     const a = this.meters[kind], d = new Float32Array(a.fftSize);
     a.getFloatTimeDomainData(d);
