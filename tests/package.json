@@ -1,0 +1,13 @@
+{
+  "name": "code-execution-lab-tests",
+  "private": true,
+  "description": "Browser tests for index.html (headless Chromium via Playwright; three.js is served locally so no network is needed).",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 --test-reporter=spec",
+    "test:journey": "node journey.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "three": "0.170.0"
+  }
+}

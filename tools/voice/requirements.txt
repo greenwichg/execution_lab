@@ -1,0 +1,6 @@
+# tools/voice/build_voice.py — authoring-time only; the web page needs none of this.
+numpy
+soundfile
+pyloudnorm
+kokoro-onnx>=0.4        # local Kokoro-82M TTS (Apache-2.0); not needed with --from-dir
+imageio-ffmpeg          # provides an ffmpeg binary with MP3 support if none is on PATH

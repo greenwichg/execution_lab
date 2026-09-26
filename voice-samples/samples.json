@@ -1,0 +1,41 @@
+[
+  {
+    "sample": "Voice A",
+    "file": "voice-samples/voice-a-af_heart.mp3",
+    "voice": "af_heart",
+    "lang": "en-us",
+    "speed": 0.9,
+    "seconds": 11.34,
+    "lineSeconds": [
+      4.51,
+      5.43
+    ],
+    "description": "US English, female \u2014 warm, clear, conversational"
+  },
+  {
+    "sample": "Voice B",
+    "file": "voice-samples/voice-b-am_michael.mp3",
+    "voice": "am_michael",
+    "lang": "en-us",
+    "speed": 0.9,
+    "seconds": 12.36,
+    "lineSeconds": [
+      5.03,
+      5.93
+    ],
+    "description": "US English, male \u2014 measured, even, understated"
+  },
+  {
+    "sample": "Voice C",
+    "file": "voice-samples/voice-c-bm_george.mp3",
+    "voice": "bm_george",
+    "lang": "en-gb",
+    "speed": 0.92,
+    "seconds": 12.73,
+    "lineSeconds": [
+      5.21,
+      6.12
+    ],
+    "description": "British English, male \u2014 documentary feel, lower register"
+  }
+]

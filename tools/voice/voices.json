@@ -1,0 +1,35 @@
+{
+  "_readme": "Voice presets for tools/voice/build_voice.py. 'temporary' is the voice embedded in index.html until a final voice is chosen. A/B/C are the comparison samples. Add an entry here to try another voice.",
+  "temporary": {
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 0.88,
+    "lang": "en-us",
+    "label": "TEMPORARY NARRATION VOICE",
+    "description": "Kokoro af_heart — warm, clear US English female; calm documentary pace"
+  },
+  "A": {
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 0.9,
+    "lang": "en-us",
+    "label": "Voice A",
+    "description": "US English, female — warm, clear, conversational"
+  },
+  "B": {
+    "engine": "kokoro",
+    "voice": "am_michael",
+    "speed": 0.9,
+    "lang": "en-us",
+    "label": "Voice B",
+    "description": "US English, male — measured, even, understated"
+  },
+  "C": {
+    "engine": "kokoro",
+    "voice": "bm_george",
+    "speed": 0.92,
+    "lang": "en-gb",
+    "label": "Voice C",
+    "description": "British English, male — documentary feel, lower register"
+  }
+}
