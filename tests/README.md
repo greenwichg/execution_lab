@@ -22,6 +22,21 @@ RECORD=1 node journey.cjs   # …also recording the final mix to artifacts/journ
 | `07-editor.test.cjs` | the code editor: E / button / Escape, typing never triggers film shortcuts, errors with line + column, examples, the "operation to follow" picker; Run & Explain rebuilds the film for the program (RUN segment, EXECUTION panel, generated narration, personalised HUD) and back to the demo; speech narration holds the film at a sentence end until the voice finishes; `?code=…&run`; GPU memory stays flat over repeated rebuilds |
 | `08-story.test.cjs` | the story builder (Node only, no browser): for every program and every operation it can follow, the story has no gaps, its bytes are the instruction's bytes, the ALU board, the adder inputs and the gate-level simulation agree bit for bit, and every narration anchor is a real beat |
 
+### Predict the Machine (`machine/`)
+
+| File | Covers |
+|---|---|
+| `10-engine.test.mjs` | the typed Mini-C engine: 85 programs (all C integer types, promotions, conversions, casts, unsigned jumps, shifts, division, printf length modifiers) match `gcc -O0 -fwrapv`; every instruction's bytes match GNU as; errors; trace events |
+| `10b-engine-fuzz.test.mjs` | a seeded differential fuzzer: random typed programs vs gcc and GNU as; every traced ALU event re-checked against x86 rules |
+| `11-items.test.mjs` | binary items (add, shift, two's complement, signed add/sub + flags, full adder): keys from `bits.js` (checked against the real x86 ALU for every 8-bit case); a simulated buggy student per misconception is diagnosed with its own tag; checkpoints ≤ 3; variants; Why layers |
+| `11b-items-adversarial.test.mjs` | exhaustive arithmetic, diagnosis honesty (false positives/negatives, mixed and partial answers), learner-facing language, generator realism, damaged links |
+| `12-state.test.mjs` / `12b-state-adversarial.test.mjs` | set codes, result codes (every single-character typo and adjacent swap detected), review links, the 2/7/21-day scheduler, 15% holdout, study arms, set planning, starter planning, board analytics (AB/BA crossover estimate with simulated coverage) |
+| `13-cards.test.mjs` | the 12 CS:APP cards × 100 variants vs gcc; every gcc claim vs gcc's real assembly; flags vs the real CPU; classic wrong answers → tags; paste-mode bisection |
+| `14-machine-core.test.cjs` | the learner loop in the browser: grid typed in working order, confidence required, diagnosis, GCSE vs A-level Why depth, checkpoints, practice → review queue → review link on a fresh device, the ladder, XSS via routes, no foreign requests, strict CSP, < 500 KB, phone layout |
+| `15-machine-teacher.test.cjs` (+ `15b`) | teacher view, projector starter (keyboard, reveal, taps), homework/study/delayed sets and result codes, the board (junk, duplicates, worked-example overlay, CSV) |
+| `16-machine-cards.test.cjs` (+ `16b`) | every CS:APP card end to end, labels, Why depth, variants, paste mode (checkpoints, errors, share links, XSS), phone layout |
+| `17-e0.test.mjs` | the E0 desk-study generator and scorer (`tools/e0/`) |
+
 `06` and `08` load the compiler and story builder straight out of `index.html` (between the `// @@MINIC-BEGIN/END` and `// @@STORY-BEGIN/END` markers), so they run in plain Node in about a second: `node --test 06-minic.test.cjs 08-story.test.cjs`.
 
 Screenshots and reports land in `tests/artifacts/` (git-ignored). Tests that check timing use `?norender`, which runs the clocks, HUD and audio without WebGL drawing, so software-rendered CI machines still run in real time.

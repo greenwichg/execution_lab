@@ -36,9 +36,9 @@ export function render(el) {
         h('ul', { class: 'card-grid', role: 'list' }, g.cards.map((c) => {
           const status = statusOf(c);
           return h('li', null, h('a', { class: 'panel card-tile', href: href(`/card/${c.id}`) },
-            h('div', { class: 'row card-tile-chips' }, chip(c.section), status ? stdChip(status) : null),
+            h('div', { class: 'row spread card-tile-top' }, chip(c.section), h('span', { class: 'small muted' }, ASK_WORDS[c.ask] || 'Predict')),
             h('h3', { class: 'card-tile-title' }, c.title),
-            h('p', { class: 'small muted' }, ASK_WORDS[c.ask] || 'Predict')));
+            status ? h('div', { class: 'card-tile-std' }, stdChip(status)) : null));
         })));
     }),
     h('section', { class: 'panel paste-promo stack-sm', 'aria-labelledby': 'paste-h' },
