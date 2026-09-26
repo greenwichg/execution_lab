@@ -24,8 +24,13 @@ contract is wrong, fix the contract *and* every caller.
   their device. No accounts, no names, no emails.
 - **No three.js, no audio, no autoplay, no music.** 2D HTML/SVG only. Motion is
   short (≤ 600 ms), purposeful, and disabled under `prefers-reduced-motion`.
-- **Fast on a £200 Chromebook.** Total shipped JS+CSS < 500 KB, first render
-  < 1 s locally, no layout thrash; SVG only where a picture explains something.
+- **Fast on a £200 Chromebook.** No dependencies, no build step. The whole app
+  is ≤ 650 KB of JS + CSS uncompressed (≈ 210 KB gzipped, which is what a static
+  host sends); any one screen loads ≤ 560 KB; time to interactive < 1 s with the
+  CPU slowed 4×; no layout thrash; SVG only where a picture explains something.
+  (The first budget, "< 500 KB in total", was set before the C compiler and the
+  cards existed; the review measured 597 KiB and we chose to restate it rather
+  than drop the compiler.)
 - **Never `innerHTML` with data.** Build DOM with `h()` from `src/lib/dom.js`.
   Pasted code, URL parameters and pasted result codes are untrusted.
 - **Accessible.** Every control reachable and operable by keyboard; visible
@@ -165,7 +170,10 @@ Item = {
   key: Answer,                    // the verified correct answer (computed, never typed by hand)
   family: 'add' | 'shift' | 'twos' | 'flags' | 'c',   // for study/holdout grouping
 }
-Field = { id, kind: 'bits'|'bit'|'choice'|'number'|'text'|'flags', label, width?, choices?, optional? }
+Field = { id, kind: 'bits'|'bit'|'choice'|'number'|'text'|'flags', label, width?, choices?, optional?, decimal? }
+// decimal: a number field that accepts non-integers (a shift's "value" answer of 11.25 shows the ×2ⁿ myth)
+// Before Check the UI requires every asked field to be answered (all result bits; a choice; a number;
+// every flag). Empty carry boxes are allowed: they mean "no carry".
 ```
 
 Bit arrays are **LSB-first** (`bits[0]` is bit 0). The UI displays MSB on the
@@ -228,7 +236,8 @@ break (for addition: the carry into the first wrong column, then that column's
 rule).
 
 ```js
-Checkpoint = { id, prompt: string, input: { kind: 'bit'|'bits'|'number'|'choice', width?, choices? }, answer: any }
+Checkpoint = { id, prompt: string, input: { kind: 'bit'|'bits'|'number'|'choice', width?, choices? }, answer: any, accept?: any[] }
+// accept: other answers that also count as right (e.g. the paper method's carry in a subtraction)
 Diagnosis = {
   tag: tagId | null,                // null when correct or unclassifiable ('other' when wrong but unclassified)
   headline: string,                 // 'Your working first goes wrong in column 3.'
@@ -512,11 +521,16 @@ confidence(onChange), chip(text), button(label, opts), statusGlyph(status), keyH
 ```js
 // src/ui/runner.js
 mountItem(el, item, opts)            // see above; opts.showSpec (default true), opts.variants (false hides "Try one like it"), opts.nextLabel
+                                     // "Try one like it" only appears when the diagnosis tag is in the item module's TARGETS
+                                     // on a miss the first Why layer opens by itself unless opts.collapsedWhy (fading)
+                                     // card items get the snippet / C-standard / gcc hooks from ui/cardhooks.js automatically
 checkpointInput(cp, onChange) → { el, focus(), disable() }   // renders a Checkpoint's input
 parseWhole(text) → number | BigInt | null;  sameValue(a, b) → bool (BigInt-safe, arrays)
 workedExample(tagInfo, item) → element;  moduleFor(item) → item-type module
 // src/ui/session.js
-runSession(holder, { total, seed, level, next(i, state) → { item, review?, group?, target? } | null, again(), endTitle?, againLabel?, showSpec? }) → { dispose() }
+runSession(holder, { total, seed, level, next(i, state) → { item, review?, group?, target? } | null, again(), endTitle?, againLabel?, showSpec?, variantsExtend? }) → { dispose() }
+// variantsExtend: a variant is asked in addition to (not instead of) the planned items — reviews use it
+// a miss is written to the scheduler at once on pagehide / tab hidden, so a reload never loses it
 loadSched(), saveSched(state), reviewLink(state) → url | '', formatDay(day) → 'Tue 29 Sep'
 // src/ui/why.js
 renderWhy(el, layers, { level, startOpen, onDepth, firstLabel }) → { destroy, openNext, depth };  renderLayer(layer) → element
@@ -528,11 +542,15 @@ bitInput({ label, value, optional, onSet, onMove, small }); addGrid(item, answer
 button, chip, seg, confidence, CONFIDENCE, statusGlyph, callout, copyBox, bitsText, keyHint, tile
 // src/ui/nav.js
 setNav('#/teacher')                  // marks the current top-nav link
+// src/ui/forget.js
+forgetControl({ onDone }) → element  // "Forget everything on this device" (removes every pm.* key)
+// src/lib/dom.js
+href(path), shareUrl(path)           // keep ONLY ?t=<teacher code> from the query; anything else is dropped
 ```
 
 Files owned by foundations: `css/core.css`, `css/why.css`, `css/item.css`,
 `src/main.js`, `src/lib/{dom,store,rng}.js`, `src/learn/{tagids,spec,catalogue}.js`,
-`src/ui/{parts,why,bitgrid,runner,session,nav}.js`,
+`src/ui/{parts,why,bitgrid,runner,session,nav,forget}.js`,
 `src/ui/views/{home,practice,check,review}.js`.
 
 ## CSS kit (`css/core.css`)

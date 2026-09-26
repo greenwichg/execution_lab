@@ -483,7 +483,9 @@ function surpriseOf(prog, evs, win, n, vr, val) {
     if (op === 'cmp' && !alu.signed && alu.node && alu.node.l && alu.node.r) {
       const lt = exprType(prog, alu.node.l, e.line), rt = exprType(prog, alu.node.r, e.line);
       const neg = (t, x) => t && t.signed && signedOf(x, w) < 0n;
-      if (neg(lt, e.a) || neg(rt, e.b)) return { tag: 'c_usual_conversions', n: j };
+      // an unsigned a > b / a <= b compiles to cmp b, a (as gcc does), so the operands arrive swapped
+      const [la, rb] = alu.swapped ? [e.b, e.a] : [e.a, e.b];
+      if (neg(lt, la) || neg(rt, rb)) return { tag: 'c_usual_conversions', n: j };
     }
   }
   // a store that changed the value: narrowing or a conversion to unsigned
@@ -642,8 +644,14 @@ function surpriseDetail(analysis, w) {
     }
     case 'c_shift_negative':
       return `>> on a negative signed value compiles to sar, which copies the sign bit in, so ${signedOf(e.a, width)} >> ${e.b} is ${signedOf(e.r, width)}. That is the division rounded down, and it stays negative.`;
-    case 'c_usual_conversions':
-      return `This comparison mixes signed and unsigned, so the signed value is converted to unsigned first: ${signedOf(e.a, width)} is compared as ${unsignedOf(e.a, width)}.`;
+    case 'c_usual_conversions': {
+      // the signed operand that was negative before the conversion (cmp b, a for an unsigned > or <=)
+      const al = ins.alu || {};
+      const [la, rb] = al.swapped ? [e.b, e.a] : [e.a, e.b];
+      const lt = al.node && al.node.l ? exprType(prog, al.node.l, e.line) : null;
+      const x = lt && lt.signed && signedOf(la, width) < 0n ? la : rb;
+      return `This comparison mixes signed and unsigned, so the signed value is converted to unsigned first: ${signedOf(x, width)} is compared as ${unsignedOf(x, width)}.`;
+    }
     case 'c_char_signedness':
       return `Plain char is signed on x86-64 gcc (-128 to 127), so storing ${s.pre} keeps its 8 bits, which read as ${w.val}.`;
     default:

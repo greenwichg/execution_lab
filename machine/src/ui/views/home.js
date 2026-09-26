@@ -3,6 +3,7 @@ import { h, href } from '../../lib/dom.js';
 import { load } from '../../lib/store.js';
 import { specsForLevel } from '../../learn/spec.js';
 import { setNav } from '../nav.js';
+import { forgetControl } from '../forget.js';
 
 const LEVEL_PANELS = [
   { id: 'gcse', title: 'GCSE', sub: 'Binary addition, overflow and shifts' },
@@ -11,12 +12,15 @@ const LEVEL_PANELS = [
 ];
 
 export async function render(el) {
+  // count due reviews straight from storage: importing the scheduler would pull in
+  // every item type, the C compiler and the cards just to show one number
   let due = 0;
   try {
-    const sched = await import('../../learn/scheduler.js');
     const state = load('sched', null);
-    if (state) due = sched.dueEntries(state, sched.dayNumber(new Date())).length;
-  } catch { /* scheduler not available: no count */ }
+    const d = new Date();
+    const today = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+    if (state && Array.isArray(state.queue)) due = state.queue.filter((e) => e && !e.done && Number.isFinite(e.due) && e.due <= today).length;
+  } catch { /* no count */ }
 
   const panels = LEVEL_PANELS.map((p) => {
     const links = p.id === 'csapp'
@@ -47,7 +51,10 @@ export async function render(el) {
         h('li', null, h('strong', null, 'Practise and return. '), 'Try one like it now; what you missed comes back in 2, 7 and 21 days.'))),
     h('div', { class: 'row spread small muted' },
       h('p', null, 'Nothing you type leaves this device. No accounts, no tracking.'),
-      h('p', null, h('a', { href: href('/teacher') }, 'For teachers'), ' · ', h('a', { href: '../index.html' }, 'The film: Code Execution Lab'))));
+      h('p', null, h('a', { href: href('/teacher') }, 'For teachers'), ' · ',
+        h('a', { href: '../index.html', rel: 'noreferrer' }, 'The film: Code Execution Lab'),
+        h('span', { class: 'small' }, ' (a separate page that loads fonts and three.js from Google and jsDelivr)'))),
+    h('div', { class: 'small muted' }, forgetControl()));
   el.append(main);
   setNav(null);
 }

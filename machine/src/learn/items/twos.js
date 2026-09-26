@@ -114,16 +114,29 @@ function placeSum(n, w) {
   return `${num(-M)} + ${n + M}`;
 }
 
+/** −2^(w−1): the top bit alone. +2^(w−1) does not fit, so there is nothing to invert. */
+function smallestSay(n, w) {
+  return `${num(n)} is the smallest ${w}-bit value: the top bit alone, ${binStr(toBits(n, w))} = ${placeSum(n, w)}. +${-n} does not fit in ${w}-bit two's complement, so there is nothing to invert and add 1 to.`;
+}
+
 function encodeDiagnosis(item, answer, m) {
   const { w, n } = item.params;
   const bits = answer.bits || [];
   if (!m.cells.bits.includes('bad')) {
+    if (m.cells.bits.every((s) => s === 'missing')) {
+      return finish(null, "You didn't give any bits.",
+        `Nothing was filled in. ${num(n)} in ${w}-bit two's complement is ${binStr(item.key.bits)}.`, { field: 'bits', index: w - 1 });
+    }
     return finish(null, "You haven't filled in every bit.",
       `The bits you gave are right. ${num(n)} in ${w}-bit two's complement is ${binStr(item.key.bits)}.`, { field: 'bits', index: m.firstWrong?.index ?? w - 1 });
   }
   const full = bits.length === w && bits.every((b) => b === 0 || b === 1);
   const focus = { field: 'bits', index: w - 1 };
   const kb = binStr(item.key.bits);
+  // −2^(w−1) has no positive twin in w bits, so invert-and-add-1 cannot start from it.
+  if (n === -(2 ** (w - 1))) {
+    return finish('other', `Your bits are not ${num(n)} in two's complement.`, smallestSay(n, w), focus);
+  }
   if (full && n < 0) {
     const inv = invert(toBits(-n, w));
     const sm = writeAs('twos_sign_magnitude', n, w);
@@ -169,7 +182,7 @@ function decodeDiagnosis(item, answer) {
   }
   return finish('other', `The value is ${num(n)}, not ${num(v)}.`,
     n < 0
-      ? `The top bit is 1, so the number is negative and worth ${placeSum(n, w)} = ${num(n)}. Invert and add 1 to check its size.`
+      ? `The top bit is 1, so the number is negative and worth ${placeSum(n, w)} = ${num(n)}. ${n === -M ? `That is the smallest ${w}-bit value.` : 'Invert and add 1 to check its size.'}`
       : `The top bit is 0, so ${b} is positive and reads like ordinary binary: ${n}.`, focus);
 }
 
@@ -251,9 +264,27 @@ export function why(item) {
       },
     ];
   }
-  const pos = toBits(-n, w);
-  const inv = invert(task === 'encode' ? pos : bits);
   const layers = [];
+  if (n === -M) {
+    layers.push({
+      id: 'twos', kind: 'twos', title: 'The smallest value',
+      say: [`${num(n)} is the smallest ${w}-bit value: the top bit alone, ${b}.`, `+${M} does not fit in ${w}-bit two's complement, so invert-and-add-1 has nothing to start from.`],
+      data: { w, steps: [{ label: num(n), bits }] },
+    });
+  } else {
+    const pos = toBits(-n, w);
+    const inv = invert(task === 'encode' ? pos : bits);
+    twosLayers(layers, { w, n, task, b, bits, pos, inv });
+  }
+  layers.push({
+    id: 'place', kind: 'text', title: 'Check with place values',
+    say: [`The top bit is worth ${num(-M)}, not +${M}.`, `So ${b} = ${placeSum(n, w)} = ${num(n)}.`],
+    data: {},
+  });
+  return layers;
+}
+
+function twosLayers(layers, { w, n, task, b, bits, pos, inv }) {
   if (task === 'encode') {
     layers.push({
       id: 'twos', kind: 'twos', title: 'Invert and add 1',
@@ -269,12 +300,6 @@ export function why(item) {
     });
     layers.push(plusOneColumns(inv, w, String(-n)));
   }
-  layers.push({
-    id: 'place', kind: 'text', title: 'Check with place values',
-    say: [`The top bit is worth ${num(-M)}, not +${M}.`, `So ${b} = ${placeSum(n, w)} = ${num(n)}.`],
-    data: {},
-  });
-  return layers;
 }
 
 // ---------------------------------------------------------------------------

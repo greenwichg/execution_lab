@@ -88,9 +88,15 @@ test('every program assembles to exactly the bytes GNU as produces', { skip: !HA
   assert.ok(checked > 1500, `checked ${checked} instructions`);
 });
 
+// extra programs for the byte check: swapped unsigned compares (cmp m, r) and neg for / -1
+const EXTRA = [
+  'unsigned a = 1, b = 2;\nunsigned long x = 3, y = 4;\nint c = a > b;\nc = a <= b + 1;\nc = x > y;\nc = x <= y * 2;\nif (a > b) c = 5;',
+  'int m = 5;\nlong L = 6;\nm = m / -1;\nm = m % -1;\nL = L / -1;\nL = L % -1;',
+];
+
 test('every distinct instruction text encodes like GNU as on its own', { skip: !HAVE_AS && 'binutils not installed' }, () => {
   const seen = new Map();
-  for (const src of Object.values(CORPUS)) {
+  for (const src of [...Object.values(CORPUS), ...EXTRA]) {
     for (const ins of build(src).insts) {
       if (ins.target !== undefined) continue;                // jumps are checked in context above
       if (!seen.has(ins.asText)) seen.set(ins.asText, ins.bytes);
@@ -110,7 +116,7 @@ test('every distinct instruction text encodes like GNU as on its own', { skip: !
   for (const op of ['movsx', 'movzx', 'cdqe', 'cqo', 'div', 'idiv', 'shr', 'sar', 'shl', 'setb', 'seta', 'movabs', 'imul', 'neg', 'not']) {
     assert.ok(ops.has(op), `corpus uses ${op}`);
   }
-  for (const needle of ['BYTE PTR', 'WORD PTR', 'QWORD PTR', 'rax, rcx', 'cl']) {
+  for (const needle of ['BYTE PTR', 'WORD PTR', 'QWORD PTR', 'rax, rcx', 'cl', 'cmp DWORD PTR [rbp-8], eax', 'cmp rcx, rax', 'setae al', 'neg rax']) {
     assert.ok(texts.some((t) => t.includes(needle)), `corpus uses ${needle}`);
   }
   assert.ok(texts.length > 150, `${texts.length} distinct instructions`);
@@ -122,7 +128,8 @@ test('jumps use the unsigned condition codes for unsigned comparisons', () => {
   assert.ok(texts('int a = 1, b = 2;\nif (a < b) a = 3;').some((t) => /^jge /.test(t)));
   assert.ok(texts('int a = -1;\nint c = a < 0U;').includes('setb al'));
   assert.ok(texts('long a = 5;\nunsigned b = 4;\nint c = a > b;').includes('setg al'));
-  assert.ok(texts('unsigned long a = 5;\nlong b = 4;\nint c = a > b;').includes('seta al'));
+  // gcc -O0 rewrites an unsigned a > b (b not a constant) as b < a: cmp b, a then setb
+  assert.ok(texts('unsigned long a = 5;\nlong b = 4;\nint c = a > b;').includes('setb al'));
   for (const [src, cc] of [['<=', 'jbe'], ['>', 'ja'], ['>=', 'jae']]) {
     assert.ok(texts(`unsigned a = 1;\nwhile (a ${src} 9) a++;`).some((t) => t.startsWith(cc + ' ')), `${src} → ${cc}`);
   }
@@ -362,10 +369,81 @@ test('runtime errors: SIGFPE cases and runaway loops', () => {
   err('unsigned z = 0;\nunsigned q = 10U % z;', /Division by zero/, 2);
   err('long z = 0;\nlong q = 10L / z;', /Division by zero/, 2);
   err('#include <limits.h>\nint m = INT_MIN;\nint d = -1;\nint q = m / d;', /doesn't fit in 32 bits.*SIGFPE/, 4);
-  err('#include <limits.h>\nlong m = LONG_MIN;\nlong q = m % -1L;', /doesn't fit in 64 bits/, 3);
+  err('#include <limits.h>\nlong m = LONG_MIN;\nlong d = -1;\nlong q = m % d;', /doesn't fit in 64 bits/, 4);
   // x / x with x = 0 is undefined behaviour: plain gcc folds it to 1 even at -O0, but idiv faults
   err('unsigned char v = 0;\nv /= v;', /Division by zero/, 2);
   err('int i = 0;\nwhile (1) {\n  i = i + 1;\n}\nreturn i;', /never ends/, 3, 'limit');
   err('for (unsigned i = 3; i >= 0; i--) {\n}', /never ends/, 1, 'limit');
   err('while (1) printf("spam spam spam\\n");', /more than 4000 characters/, 1, 'limit');
+});
+
+// gcc -O0 folds a signed division by the constant -1 into neg (and x % -1 into 0), so INT_MIN / -1
+// with a literal -1 prints INT_MIN instead of trapping; a -1 held in a variable still reaches idiv.
+test('division by the constant -1: neg and 0 like gcc -O0, idiv (and SIGFPE) for a variable', () => {
+  const texts = (src) => build(src).insts.map((i) => i.asText);
+  const out = (src) => run(build(src)).output;
+  const t1 = texts('int m = 5;\nint n = m / -1;\nint r = m % -1;');
+  assert.ok(t1.includes('neg eax') && !t1.some((t) => /idiv|cdq/.test(t)), t1.join(' | '));
+  assert.ok(texts('long m = 5;\nlong n = m / -1L;').includes('neg rax'));
+  assert.ok(texts('long m = 5;\nlong n = m / (long)-1;').includes('neg rax'), 'a cast literal is a constant too');
+  assert.equal(out('int m = -2147483647 - 1;\nint n = m / -1 + 0;\nprintf("%d\\n", n);'), '-2147483648\n');
+  assert.equal(out('int m = -2147483647 - 1;\nprintf("%d\\n", m % -1);\nm /= -1;\nprintf("%d\\n", m);'), '0\n-2147483648\n');
+  assert.equal(out('#include <limits.h>\nlong m = LONG_MIN;\nprintf("%ld %ld\\n", m / -1L, m % -1);'), '-9223372036854775808 0\n');
+  assert.equal(out('char c = -128;\nint k = 7;\nprintf("%d %d\\n", c / -1, k / -1);'), '128 -7\n');
+  // unsigned: -1 is UINT_MAX, a real divisor
+  assert.ok(texts('unsigned u = 5;\nunsigned q = u / -1;').some((t) => /^div /.test(t)));
+  assert.equal(out('unsigned u = 4294967295U;\nprintf("%u %u\\n", u / -1, u % -1);'), '1 0\n');
+  // the neg records the wrap as a signed overflow (OF = 1), so paste can name the trap
+  const ev = run(build('int m = -2147483647 - 1;\nint n = m / -1;'), { trace: true }).events.find((e) => /^neg/.test(e.text));
+  assert.equal(ev.flagsAfter.OF, 1);
+  assert.throws(() => run(build('int m = -2147483647 - 1;\nint d = -1;\nint q = m / d;')), (e) => e instanceof CError && /SIGFPE/.test(e.message) && e.line === 3);
+});
+
+test('division by the constant -1 agrees with gcc -O0 (output and asm)', { skip: !HAVE_GCC && 'gcc not installed' }, () => {
+  const src = '#include <limits.h>\nint m = INT_MIN;\nlong L = LONG_MIN;\nint k = 7;\nprintf("%d %d %ld %ld %d\\n", m / -1, m % -1, L / -1, L % -1L, k / -1);';
+  assert.deepEqual(run(build(src)).output, runGcc('divm1', src).out);
+  const c = path.join(tmp, 'divm1s.c');
+  fs.writeFileSync(c, gccSource('int m = -2147483647 - 1;\nint n = m / -1;'));
+  const asm = execFileSync('gcc', ['-O0', '-S', '-masm=intel', '-o', '-', c], { encoding: 'utf8' });
+  assert.match(asm, /\bneg\s+eax\b/);
+  assert.doesNotMatch(asm, /\bidiv\b/);
+});
+
+// gcc -O0 swaps the operands of an unsigned a > b / a <= b when b is not a constant
+test('unsigned > and <= compare b with a (cmp b, a; setb / setae / jae), like gcc -O0', () => {
+  const texts = (src) => build(src).insts.map((i) => i.asText);
+  const gt = texts('unsigned a = 1, b = 2;\nint c = a > b;');
+  const k = gt.indexOf('setb al');
+  assert.ok(k > 0 && /^cmp DWORD PTR \[rbp-8\], eax$/.test(gt[k - 1]), gt.join(' | '));
+  assert.ok(texts('unsigned a = 1, b = 2;\nint c = a <= b;').includes('setae al'));
+  assert.ok(texts('unsigned a = 1, b = 2;\nif (a > b) a = 3;').some((t) => /^jae /.test(t)));
+  assert.ok(texts('unsigned a = 1, b = 2;\nif (a <= b) a = 3;').some((t) => /^jb /.test(t)));
+  assert.ok(texts('unsigned a = 1, b = 2;\nint c = a > b + 1;').includes('cmp ecx, eax'));
+  // a constant right operand and signed comparisons keep the order
+  assert.ok(texts('unsigned a = 1;\nint c = a > 5;').includes('seta al'));
+  assert.ok(texts('int a = 1, b = 2;\nint c = a > b;').includes('setg al'));
+  // the cmp computes b − a: CF = 1 exactly when a > b, and the alu record says so
+  const p = build('int a = -1;\nunsigned b = 0;\nint c = a > b;\nint d = a <= b;\nprintf("%d %d\\n", c, d);');
+  const r = run(p, { trace: true });
+  assert.equal(r.output, '1 0\n');
+  const cmp = r.events.find((e) => e.line === 3 && /^cmp/.test(e.text));
+  assert.equal(cmp.a, 0n);
+  assert.equal(cmp.b, 0xffffffffn);
+  assert.equal(cmp.flagsAfter.CF, 1);
+  assert.equal(p.insts[cmp.i].alu.swapped, true);
+  for (const [x, y] of [[0, 0], [1, 0], [0, 1], [4294967295, 4294967295], [4294967295, 0]]) {
+    const o = run(build(`unsigned a = ${x}U;\nunsigned b = ${y}U;\nprintf("%d %d %d %d\\n", a > b, a <= b, a > b + 0, a <= b + 0);\nif (a > b) printf("gt\\n");\nif (a <= b) printf("le\\n");`)).output;
+    assert.equal(o, `${+(x > y)} ${+(x <= y)} ${+(x > y)} ${+(x <= y)}\n${x > y ? 'gt' : 'le'}\n`);
+  }
+});
+
+test('unsigned > and <= operand order matches gcc -O0 -S', { skip: !HAVE_GCC && 'gcc not installed' }, () => {
+  const src = 'unsigned a = 1;\nunsigned b = 2;\nint c = a > b;\nint d = a <= b;';
+  const c = path.join(tmp, 'ugt.c');
+  fs.writeFileSync(c, gccSource(src));
+  const asm = execFileSync('gcc', ['-O0', '-S', '-masm=intel', '-o', '-', c], { encoding: 'utf8' })
+    .split('\n').map((l) => l.trim().replace(/\s+/g, ' ')).filter((l) => /^(cmp|set)/.test(l));
+  const ours = build(src).insts.map((i) => i.asText).filter((l) => /^(cmp|set)/.test(l));
+  // same shape: cmp <b in memory>, eax then setb / setnb (gcc prints setae as setnb)
+  assert.deepEqual(asm.map((l) => l.replace(/-?\d+\[rbp\]/, 'M').replace('setnb', 'setae')), ours.map((l) => l.replace(/\[rbp-?\d+\]/, 'M')));
 });

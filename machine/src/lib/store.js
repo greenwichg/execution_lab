@@ -32,3 +32,16 @@ export function remove(key) {
 
 /** true when the browser keeps data between visits (shown to learners so they know to save their review link) */
 export function persistent() { return !!S(); }
+
+/** remove everything this app stored on this device (shared Chromebooks) */
+export function clearAll() {
+  const s = S();
+  try {
+    if (s) {
+      const keys = [];
+      for (let i = 0; i < s.length; i++) { const k = s.key(i); if (k && k.startsWith(PREFIX)) keys.push(k); }
+      keys.forEach((k) => s.removeItem(k));
+    }
+  } catch { /* ignore */ }
+  memory.clear();
+}

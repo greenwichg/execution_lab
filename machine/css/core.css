@@ -12,9 +12,9 @@
   --paper-3: #e9e6dd;
   --ink: #16181d;
   --ink-2: #3a3f4a;
-  --muted: #646a76;
+  --muted: #5d6370;
   --line: #d9d5ca;
-  --line-strong: #b9b3a4;
+  --line-strong: #7d7768;          /* ≥ 3:1 against paper: cell and control outlines */
   --accent: #3b41c5;
   --accent-ink: #ffffff;
   --accent-soft: #e6e7fb;
@@ -44,7 +44,7 @@
     --ink-2: #c9cdd6;
     --muted: #9aa1ae;
     --line: #2b303a;
-    --line-strong: #414856;
+    --line-strong: #767e8e;
     --accent: #9096ff;
     --accent-ink: #0d0f14;
     --accent-soft: #23264a;
@@ -73,6 +73,13 @@ body.projector {
   --ok: #0050b0;
   --bad: #b33a00;
   --hl: #ffe98a;
+  /* every token, so a dark OS theme can't leak into the light projector page */
+  --accent-soft: #e6e7fb;
+  --ok-soft: #e1edfb;
+  --bad-soft: #fbe8dc;
+  --line-strong: #6f6a5c;
+  --focus: #2c32b8;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 6px 20px rgba(0, 0, 0, .08);
   --bit: 4.4rem;
   --bit-font: 3rem;
   color-scheme: light;
@@ -140,6 +147,7 @@ img, svg { max-width: 100%; }
 .grid-auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--gap); }
 .lede { font-size: 1.12rem; color: var(--ink-2); max-width: 62ch; }
 .muted { color: var(--muted); }
+.small-h { font-size: 1rem; }
 .small { font-size: .88rem; }
 .center { text-align: center; }
 
@@ -176,6 +184,12 @@ a.panel h2, a.panel h3 { color: var(--ink); }
 .seg button { min-height: 42px; padding: 8px 14px; border: 0; border-right: 1px solid var(--line); background: var(--paper); cursor: pointer; font-weight: 550; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+/* the choice is marked by a tick as well as colour (washed-out projectors, greyscale, forced colours) */
+.seg button[aria-pressed="true"]::before { content: '✓ '; }
+@media (forced-colors: active) {
+  .seg button { border: 1px solid ButtonText; }
+  .seg button[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}
 .seg button:disabled { cursor: default; }
 
 /* ---------- chips, kbd, status ---------- */

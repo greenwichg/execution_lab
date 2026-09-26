@@ -32,7 +32,9 @@ export function build(params) {
   const { a, b, cin } = params;
   const wires = !!params.wires;
   const d = circuit(params);
-  const fields = [...(wires ? WIRES : []), ...OUTS].map((f) => ({ id: f.id, kind: 'bit', label: f.label }));
+  // Without the wires, the output labels must not name wires the learner never sees.
+  const outs = wires ? OUTS : [{ id: 'sum', label: 'sum' }, { id: 'cout', label: 'carry out' }];
+  const fields = [...(wires ? WIRES : []), ...outs].map((f) => ({ id: f.id, kind: 'bit', label: f.label }));
   const key = { sum: d.sum, cout: d.cout };
   if (wires) Object.assign(key, { x1: d.x1, a1: d.a1, a2: d.a2 });
   return {
@@ -124,7 +126,7 @@ export function diagnose(item, answer, marking) {
   // Working order follows the signal: stop at the first wire that differs.
   if (m.cells[f] === 'missing') {
     return finish(null, `You didn't give ${f === 'cout' ? 'the carry out' : `the value of ${NAMES[f]}`}.`,
-      `Follow the gates in order: ${FORMULA[f](d)}.`, focus);
+      item.params.wires ? `Follow the gates in order: ${FORMULA[f](d)}.` : plainRule(d), focus);
   }
   // An XOR gate with two 1s worked out as OR: the gate-level form of "1 + 1 = 1".
   if (item.params.wires && f === 'x1' && d.a === 1 && d.b === 1 && answer.x1 === 1) {
@@ -142,7 +144,15 @@ export function diagnose(item, answer, marking) {
     if (r && (!item.params.wires || r.diagnosis.tag === 'add_three_ones')) return r;
   }
   return finish('other', `Your ${NAMES[f]} is not right.`,
-    `Follow the gates in order: ${FORMULA[f](d)}. The inputs add up to ${n}${n >= 2 ? `, which is ${n.toString(2)} in binary` : ''}.`, focus);
+    item.params.wires
+      ? `Follow the gates in order: ${FORMULA[f](d)}. The inputs add up to ${n}${n >= 2 ? `, which is ${n.toString(2)} in binary` : ''}.`
+      : plainRule(d), focus);
+}
+
+/** no wires asked: explain with plain addition, never with a wire the learner has not seen */
+function plainRule(d) {
+  const n = d.a + d.b + d.cin;
+  return `Add all three inputs: a + b + carry-in = ${d.a} + ${d.b} + ${d.cin} = ${n}${n >= 2 ? `, which is ${n.toString(2)} in binary` : ''}. So sum = ${d.sum} and carry out = ${d.cout}.`;
 }
 
 export function why(item, diagnosis, { level } = {}) {

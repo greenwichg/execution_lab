@@ -157,14 +157,18 @@ export function studentReplies(A, B, cin, student) {
 // Checkpoints shared with sadd.js: locate the break in a result-only answer
 // ---------------------------------------------------------------------------
 
-export function carryCheckpoint(i, c, name = colName(i)) {
-  return {
+/** `accept`: every carry that counts as right (another valid method can give a different one) */
+export function carryCheckpoint(i, c, name = colName(i), accept = [c]) {
+  const cp = {
     id: 'carry-in',
     prompt: `What is the carry into ${name}? Work through the columns to its right again.`,
     input: { kind: 'bit' },
     answer: c,
     column: i,
   };
+  const ok = [...new Set([c, ...accept])];
+  if (ok.length > 1) cp.accept = ok;
+  return cp;
 }
 
 export function columnCheckpoint(i, a, b, c, name = colName(i)) {
@@ -187,7 +191,7 @@ export function columnCheckpoint(i, a, b, c, name = colName(i)) {
 export function resultBitFlow(i, a, b, c, cps, name = colName(i), altC = c) {
   let j = 0;
   if (i > 0) {
-    if (cps.length <= j) return { next: carryCheckpoint(i, c, name) };
+    if (cps.length <= j) return { next: carryCheckpoint(i, c, name, [c, altC]) };
     // "Not sure" is not evidence of a misconception, so nothing is tagged.
     if (cps[j] === null || cps[j] === undefined) return { tag: 'other', carryWrong: true, unsure: true };
     if (cps[j] !== c && cps[j] !== altC) return { tag: c === 1 ? 'add_no_carry' : 'other', carryWrong: true };
@@ -283,7 +287,8 @@ const carryRow = (carries, w) => Array.from({ length: w }, (_, j) => carries?.[j
 export function shiftedCarries(keyCarries, ansCarries, w) {
   const k = carryRow(keyCarries, w);
   const s = carryRow(ansCarries, w);
-  if (sameBits(k, s)) return null;
+  // Only the carry out of the top column differs: that is the overflow carry, not a moved row.
+  if (sameBits(k.slice(0, -1), s.slice(0, -1))) return null;
   const right = [...k.slice(1), 0];      // each carry written under the column that made it
   const left = [0, ...k.slice(0, -1)];   // each carry written two columns along
   if (right.includes(1) && sameBits(s, right)) return 'right';
@@ -377,6 +382,74 @@ function unwrittenCarry(item, answer, i) {
     `A 1 carries out of the top column, so the true answer ${a + b} needs ${w + 1} bits. That lost carry is an overflow error.`, focus);
 }
 
+/**
+ * A learner who, from column i on, writes each carry d columns along (above
+ * i + d instead of i + 1) and adds it there. Columns right of i are as the key.
+ * Returns what they write: result bits and the carry row (blank = 0).
+ */
+function displacedWork(A, B, c, i, d, w) {
+  const res = new Array(w).fill(0);
+  const car = new Array(w + 1).fill(0);
+  const pend = new Array(w + d + 1).fill(0);
+  pend[i] = c[i];
+  for (let j = i; j < w; j++) {
+    const n = A[j] + B[j] + pend[j];
+    res[j] = n & 1;
+    if (n >= 2) {
+      pend[j + d] = 1;
+      if (j + d <= w) car[j + d] = 1;
+    }
+  }
+  return { res, car };
+}
+
+/** the plain dropped carry: column i's carry is lost, then every later column is added correctly */
+function droppedOnceWork(A, B, c, i, w) {
+  const res = new Array(w).fill(0);
+  const car = new Array(w + 1).fill(0);
+  res[i] = (A[i] + B[i] + c[i]) & 1;
+  let carry = 0;
+  for (let j = i + 1; j < w; j++) {
+    const n = A[j] + B[j] + carry;
+    res[j] = n & 1;
+    carry = n >> 1;
+    car[j + 1] = carry;
+  }
+  return { res, car };
+}
+
+/**
+ * Column i made a carry, the learner left it out of column i + 1, and column
+ * i + 1's sum shows it was not added there. If the learner's working instead
+ * matches writing that carry one or two columns too far left (and adding it
+ * there), return how far (2 or 3 columns along); otherwise null. To keep false
+ * alarms rare, the match must run one column past the one the carry landed in
+ * (or to the top) and past the first column where a plain dropped carry would
+ * look different.
+ */
+function misplacedCarry(item, answer, i) {
+  const { w } = item.params;
+  const { a: A, b: B } = item.show;
+  const c = item.sim.carries;
+  const res = answer.result || [];
+  const car = (j) => answer.carries?.[j] ?? 0;
+  const same = (work, j) => res[j] === work.res[j] && car(j + 1) === work.car[j + 1];
+  const dropped = droppedOnceWork(A, B, c, i, w);
+  for (const d of [2, 3]) {
+    if (i + d > w - 1) continue;             // the carry must land in a column whose sum shows it was added
+    const work = displacedWork(A, B, c, i, d, w);
+    let upTo = i - 1;                        // last column (from i) where the learner matches this model
+    while (upTo + 1 < w && same(work, upTo + 1)) upTo++;
+    // Through the landing column and one more (or to the top): a short match is
+    // too easy to hit by chance.
+    if (upTo < Math.min(w - 1, i + d + 1)) continue;
+    let split = i;                           // first column where this model and a dropped carry differ
+    while (split < w && work.res[split] === dropped.res[split] && work.car[split + 1] === dropped.car[split + 1]) split++;
+    if (split < w && split <= upTo) return d;
+  }
+  return null;
+}
+
 /** the column that made the lowest carry: where a misplaced carry row first shows */
 function firstCarryColumn(item) {
   const i = item.sim.carries.findIndex((c, j) => j > 0 && c === 1);
@@ -398,8 +471,12 @@ export function diagnose(item, answer, marking, cpAnswers = []) {
   if (fw && fw.field === 'result' && fw.index < w && m.cells.result[fw.index] === 'missing') return columnUnanswered(item, fw.index);
 
   if (item.show.ask === 'full') {
-    // A whole carry row moved one column, noticed where it first goes wrong.
-    const dir = fw && fw.field === 'carries' ? shiftedCarries(key.carries, answer.carries, w) : null;
+    // A whole carry row moved one column, noticed where it first goes wrong. Only
+    // when every result bit is right: the carries were added in the right place,
+    // just written in the wrong one (a carry that was also added in the wrong
+    // column is caught column by column below).
+    const resultsRight = key.result.every((k, j) => j >= w || res[j] === k);
+    const dir = fw && fw.field === 'carries' && resultsRight ? shiftedCarries(key.carries, answer.carries, w) : null;
     if (dir) {
       const col = firstCarryColumn(item);
       return finish('add_carry_wrong_col', 'Your carry row is shifted by one column.',
@@ -414,6 +491,13 @@ export function diagnose(item, answer, marking, cpAnswers = []) {
       if (rOk && key.carries[i + 1] === 1) {
         const d = unwrittenCarry(item, answer, i);
         if (d) return d;
+        const along = (co ?? 0) === 0 ? misplacedCarry(item, answer, i) : null;
+        if (along) {
+          const n = A[i] + B[i] + c[i];
+          return finish('add_carry_wrong_col', `Your carry from ${colName(i)} is in the wrong column.`,
+            `In ${colName(i)}, ${colTerms(A[i], B[i], c[i])} ${ruleClause(n)} into ${colName(i + 1)}. You wrote that carry above ${colName(i + along)} instead and added it there.`,
+            { column: i, field: 'carries', index: i + 1 });
+        }
       }
       const tag = classifyColumn(A[i], B[i], c[i], res[i] ?? null, co);
       return finish(tag, `Your working first goes wrong in ${colName(i)}.`, columnDetail(tag, i, A[i], B[i], c[i], res[i] ?? null, co, colName(i), i === w - 1),
@@ -538,6 +622,15 @@ export function misconceive(params, tag, variantNo = 0) {
   } else if (tag === 'add_three_ones') {
     const c = item.sim.carries;
     for (let i = 0; i < w; i++) if (A[i] + B[i] + c[i] === 3) ans.result[i] = 0;
+  } else if (tag === 'add_carry_wrong_col' && variantNo === 1) {
+    // Each carry written one column too far left, and added there.
+    const lowest = item.sim.carries.findIndex((c, j) => j > 0 && c === 1) - 1;
+    if (lowest >= 0) {
+      const work = displacedWork(A, B, item.sim.carries, lowest, 2, w);
+      for (let j = lowest; j < w; j++) ans.result[j] = work.res[j];
+      for (let j = lowest + 1; j <= w; j++) ans.carries[j] = work.car[j] || null;
+      ans.overflow = work.car[w] ? 'yes' : 'no';
+    }
   } else if (tag === 'add_carry_wrong_col') {
     ans.carries = [null, ...key.carries.slice(2), null];
   } else if (tag === 'add_ninth_bit') {
@@ -552,7 +645,7 @@ export function misconceive(params, tag, variantNo = 0) {
 
 function exercises(params, tag) {
   const item = build({ ...params, ask: 'full' });
-  const variants = tag === 'add_no_carry' ? [0, 1] : [0];
+  const variants = tag === 'add_no_carry' || tag === 'add_carry_wrong_col' ? [0, 1] : [0];
   return variants.every((v) => {
     const ans = misconceive(params, tag, v);
     const m = mark(item, ans);

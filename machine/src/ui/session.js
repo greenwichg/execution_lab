@@ -48,6 +48,14 @@ export function runSession(holder, cfg) {
   let runner = null;
   let pending = null;             // a first attempt not yet written to the scheduler
   let variant = null;             // the next item when the learner asked for "one like it"
+  const again = [];               // { tag, at }: bring a misconception back once more after a correct variant
+  let total = cfg.total;
+
+  // a miss must reach the review queue even if the tab closes before "Next"
+  const onHide = () => commit();
+  const onVis = () => { if (document.visibilityState === 'hidden') commit(); };
+  addEventListener('pagehide', onHide);
+  document.addEventListener('visibilitychange', onVis);
 
   const bar = h('div', { class: 'session-bar' });
   const stage = h('div', { class: 'session-stage' });
@@ -55,7 +63,7 @@ export function runSession(holder, cfg) {
 
   function drawBar() {
     const dots = h('span', { class: 'progress-dots', 'aria-hidden': 'true' });
-    for (let k = 0; k < cfg.total; k++) {
+    for (let k = 0; k < total; k++) {
       const r = results[k];
       dots.append(h('span', { class: [r && (r.correct ? 'done-ok' : 'done-bad'), k === i && !r && 'now'] }));
     }
@@ -79,9 +87,14 @@ export function runSession(holder, cfg) {
   }
 
   function ask() {
-    if (i >= cfg.total) return finish();
+    if (i >= total) return finish();
     let next = variant;
     variant = null;
+    const due = again.findIndex((a) => a.at <= i);
+    if (!next && due >= 0) {
+      const { tag, item: like } = again.splice(due, 1)[0];
+      try { next = { item: makeItem(like.type, modOf(like.type).variant(like, tag, rng)), target: tag, group: 'drill' }; } catch (e) { console.error(e); }
+    }
     if (!next) next = cfg.next(i, state);
     if (!next) return finish();
     const { item } = next;
@@ -92,10 +105,13 @@ export function runSession(holder, cfg) {
     stage.replaceChildren();
     runner = mountItem(stage, item, {
       mode: 'practice', feedback, level: item.level || cfg.level, showSpec: cfg.showSpec,
-      progress: `Question ${i + 1} of ${cfg.total}`,
+      progress: `Question ${i + 1} of ${total}`,
+      variants: !!cfg.variantsExtend || i + 1 < total,
       collapsedWhy: !!fade.collapseWhy,
       onDone(r) {
         results[i] = { correct: r.correct, confidence: r.confidence, tag: r.tag, review: !!next.review, group };
+        // a correct "one like it": come back to the same misconception once more, a little later
+        if (r.correct && next.target && !next.review && i + 2 < total) again.push({ tag: next.target, item, at: i + 2 });
         pending = { item, correct: r.correct, tag: r.tag, target: next.target, group, review: next.review };
         if (r.correct || feedback === 'answerOnly') commit();
         drawBar();
@@ -107,7 +123,8 @@ export function runSession(holder, cfg) {
       onNext(kind) {
         const last = results[i];
         i++;
-        if (kind === 'variant' && last?.tag && i < cfg.total) {
+        if (kind === 'variant' && cfg.variantsExtend) total++;          // a review still asks every due item
+        if (kind === 'variant' && last?.tag && i < total) {
           const mod = modOf(item.type);
           let params = null;
           try { params = mod.variant(item, last.tag, rng); } catch (e) { console.error(e); }
@@ -158,6 +175,8 @@ export function runSession(holder, cfg) {
       : guess ? `You were guessing ${times(guess.n)} and right ${times(guess.right)}.` : '';
     const tags = [...new Set(done.filter((r) => !r.correct && r.tag && TAGS[r.tag]).map((r) => r.tag))];
     const summary = sched.queueSummary(state, today());
+    const onNextDay = summary.next === null || summary.next === undefined ? 0
+      : sched.activeEntries(state).filter((e) => e.due === summary.next).length;
     const link = reviewLink(state);
     stage.replaceChildren(h('section', { class: 'session-end stack', 'aria-labelledby': 'end-h' },
       h('h2', { id: 'end-h', tabindex: '-1' }, cfg.endTitle || 'Session complete'),
@@ -172,7 +191,7 @@ export function runSession(holder, cfg) {
         h('h3', null, 'What to remember'),
         h('ul', { class: 'remember' }, tags.map((t) => h('li', null, h('strong', null, `${TAGS[t].label}. `), TAGS[t].fix || '')))) : null,
       summary.next !== null && summary.next !== undefined
-        ? h('p', null, `What you missed comes back on ${formatDay(summary.next)}${summary.later > 1 ? ` (${summary.later} questions waiting)` : ''}.`)
+        ? h('p', null, `Next review: ${formatDay(summary.next)} (${onNextDay} question${onNextDay === 1 ? '' : 's'})${summary.later > onNextDay ? `, and ${summary.later - onNextDay} more after that` : ''}.`)
         : h('p', null, 'Nothing is waiting for review.'),
       link ? h('div', { class: 'stack-sm' },
         h('p', { class: 'small' }, persistent() ? 'Your reviews are saved on this device. To take them to another device, or in case this one forgets, bookmark this link:' : "This browser won't remember your reviews, so bookmark this link to bring them back:"),
@@ -187,7 +206,12 @@ export function runSession(holder, cfg) {
 
   ask();
   return {
-    dispose() { commit(); runner?.destroy(); },
+    dispose() {
+      commit();
+      removeEventListener('pagehide', onHide);
+      document.removeEventListener('visibilitychange', onVis);
+      runner?.destroy();
+    },
     get state() { return state; },
   };
 }

@@ -47,7 +47,7 @@ export function mountItem(el, item, opts = {}) {
   const checkHint = h('p', { class: 'check-hint small muted', role: 'status' });
   const checkBtn = button('Check answer', { kind: 'primary', onClick: () => check() });
   const actions = h('div', { class: 'item-actions row' }, checkBtn, checkHint);
-  const feedbackEl = h('div', { class: 'item-feedback stack', 'aria-live': 'polite' });
+  const feedbackEl = h('div', { class: 'item-feedback stack' });
   const root = h('section', { class: ['item', `item-${item.type}`, opts.mode && `mode-${opts.mode}`], 'aria-label': 'Question' },
     head, prompt, before, answerArea, confBox.el, actions, feedbackEl);
   el.appendChild(root);
@@ -65,6 +65,12 @@ export function mountItem(el, item, opts = {}) {
 
   function check() {
     if (marking) return;
+    const missing = controls.incomplete();
+    if (missing) {
+      checkHint.textContent = missing.message;
+      missing.focus?.();
+      return;
+    }
     if (!conf) {
       checkHint.textContent = 'First choose how sure you are — it helps you see what you really know.';
       confBox.el.querySelector('button')?.focus();
@@ -115,7 +121,7 @@ export function mountItem(el, item, opts = {}) {
     feedbackEl.append(callout('bad', diagnosis.headline, diagnosis.detail || tagInfo?.student || ''));
     opts.afterReveal?.(feedbackEl, { item, marking });
     const layers = safeWhy(diagnosis);
-    if (layers.length) mountWhy(layers, !!opts.collapsedWhy);
+    if (layers.length) mountWhy(layers, !!opts.collapsedWhy, opts.collapsedWhy ? 0 : 1);
     if (opts.showWorked && tagInfo?.worked) feedbackEl.append(workedExample(tagInfo, item));
     feedbackEl.append(nextButtons(true));
     focusFeedback();
@@ -146,7 +152,7 @@ export function mountItem(el, item, opts = {}) {
       cpHint.remove();
       if (v === null && input.el.tagName === 'INPUT') input.el.value = '';
       go.disabled = true; skip.disabled = true; input.disable();
-      const right = sameValue(v, cp.answer);
+      const right = sameValue(v, cp.answer) || (cp.accept || []).some((a) => sameValue(v, a));
       // "Not sure" is not a wrong answer: no ✗, just the value
       box.append(v === null
         ? h('p', { class: 'small muted cp-result' }, `The answer is ${showValue(cp.answer, cp.input)}.`)
@@ -163,10 +169,10 @@ export function mountItem(el, item, opts = {}) {
     input.focus();
   }
 
-  function mountWhy(layers, collapsed) {
+  function mountWhy(layers, collapsed, startOpen = 0) {
     const holder = h('div', { class: 'item-why' });
     feedbackEl.append(holder);
-    renderWhy(holder, layers, { level, startOpen: 0, onDepth: (n) => { depth = n; }, firstLabel: collapsed ? 'Show why ↓' : 'Why? ↓' });
+    renderWhy(holder, layers, { level, startOpen, onDepth: (n) => { depth = n; }, firstLabel: collapsed ? 'Show why ↓' : 'Why? ↓' });
   }
 
   function safeWhy(diag) {
@@ -181,7 +187,8 @@ export function mountItem(el, item, opts = {}) {
       opts.onFinal?.({ ...doneResult, depth, checkpoints: cps.length, cpAnswers: cps.slice(), diagnosis });
       opts.onNext?.(kind);
     };
-    if (wrong && feedback === 'full' && opts.variants !== false) {
+    const aimable = !!diagnosis?.tag && (mod.TARGETS || []).includes(diagnosis.tag);
+    if (wrong && feedback === 'full' && opts.variants !== false && aimable) {
       row.append(button('Try one like it', { kind: 'primary', onClick: () => finish('variant') }),
         button(opts.nextLabel || 'Next question', { onClick: () => finish('next') }));
     } else {
@@ -208,6 +215,7 @@ export function mountItem(el, item, opts = {}) {
 // ------------------------------------------------------------------ fields
 function renderFields(item, answer, area, { projector }) {
   const locks = [];
+  const checks = [];            // () => { message, focus } | null, in page order
   let focusStart = null;
   const gridFields = new Set();
   const isAddition = Array.isArray(item.show?.a) && Array.isArray(item.show?.b) && (item.type === 'add' || item.type === 'sadd');
@@ -220,6 +228,12 @@ function renderFields(item, answer, area, { projector }) {
     area.append(grid.el);
     focusStart = () => grid.focusStart();
     locks.push((m, key) => grid.lock(m, key));
+    const rf = resultField;
+    checks.push(() => {
+      const bits = answer[rf.id] || [];
+      const empty = bits.findIndex((b, i) => i !== rf.optionalIndex && (b === null || b === undefined));
+      return empty < 0 ? null : { message: 'Fill in every bit of the result (0 or 1) — an empty carry box just means no carry.', focus: () => grid.focusResult(empty) };
+    });
   } else if (item.show && (item.show.bits || item.show.x !== undefined)) {
     area.append(showOperand(item));
   }
@@ -229,9 +243,11 @@ function renderFields(item, answer, area, { projector }) {
     area.append(ctl.el);
     if (!focusStart) focusStart = ctl.focus;
     locks.push((m, key) => ctl.lock(m.cells?.[f.id], key?.[f.id]));
+    if (!f.optional) checks.push(() => (ctl.isEmpty() ? { message: ctl.emptyMessage, focus: ctl.focus } : null));
   }
   return {
     focusStart: () => focusStart?.(),
+    incomplete() { for (const c of checks) { const r = c(); if (r) return r; } return null; },
     lock(m, key) {
       locks.forEach((fn) => fn(m, key));
       if (grid && item.show.aValue !== undefined) grid.showValues(valueLabels(item));
@@ -239,11 +255,15 @@ function renderFields(item, answer, area, { projector }) {
   };
 }
 
+const signedText = (v) => (v === '' || v === undefined || v === null ? '' : Number(v) < 0 ? `−${-Number(v)}` : String(v));
 function valueLabels(item) {
   const s = item.show;
   if (s.labels) return s.labels;
-  const r = item.sim && typeof item.sim.value === 'number' ? item.sim.value : '';
-  return { a: String(s.aValue ?? ''), b: String(s.bValue ?? ''), r: String(r) };
+  // a signed sum is read in two's complement: −20 + −30 = −50, not 206
+  const signed = item.type === 'sadd' || s.signed;
+  const r = signed && item.sim && item.sim.signedValue !== undefined ? item.sim.signedValue
+    : item.sim && typeof item.sim.value === 'number' ? item.sim.value : '';
+  return { a: signedText(s.aValue ?? ''), b: signedText(s.bValue ?? ''), r: signedText(r) };
 }
 
 /** operand display for non-addition items (shift source, two's complement bits…) */
@@ -265,7 +285,8 @@ function fieldControl(f, item, answer) {
     if (!Array.isArray(answer[f.id])) answer[f.id] = new Array(w).fill(null);
     const row = bitRow(w, { values: answer[f.id], label: f.label, dir: f.dir || 'right', optionalIndex: f.optionalIndex, cellLabel: (i) => `${f.label}, bit ${i}` });
     const el = h('div', { class: 'field field-bits' }, label, row.el);
-    return { el, focus: () => row.focusStart(), lock: (st, key) => row.lock(Array.isArray(st) ? st : [], key || []) };
+    const isEmpty = () => answer[f.id].some((b, i) => i !== f.optionalIndex && (b === null || b === undefined));
+    return { el, focus: () => row.focusStart(), lock: (st, key) => row.lock(Array.isArray(st) ? st : [], key || []), isEmpty, emptyMessage: `Fill in every bit of “${f.label}” (0 or 1).` };
   }
   if (f.kind === 'choice' || f.kind === 'bit') {
     const choices = f.kind === 'bit' ? [0, 1] : f.choices;
@@ -275,6 +296,7 @@ function fieldControl(f, item, answer) {
     return {
       el, focus: () => s.el.querySelector('button')?.focus(),
       lock(st, key) { s.setDisabled(true); markNote(note, st, key, choiceLabel); },
+      isEmpty: () => answer[f.id] === null || answer[f.id] === undefined, emptyMessage: `Choose an answer for “${f.label}”.`,
     };
   }
   if (f.kind === 'flags') {
@@ -289,7 +311,8 @@ function fieldControl(f, item, answer) {
     });
     const el = h('div', { class: 'field field-flags' }, label, h('div', { class: 'flag-grid' }, rows));
     return {
-      el, focus: () => segs[names[0]].el.querySelector('button')?.focus(),
+      el, focus: () => segs[names.find((n) => answer[f.id][n] === null || answer[f.id][n] === undefined) || names[0]].el.querySelector('button')?.focus(),
+      isEmpty: () => names.some((n) => answer[f.id][n] === null || answer[f.id][n] === undefined), emptyMessage: 'Set every flag to 0 or 1.',
       lock(st, key) {
         names.forEach((n, idx) => {
           segs[n].setDisabled(true);
@@ -305,12 +328,18 @@ function fieldControl(f, item, answer) {
   const input = multiline
     ? h('textarea', { class: 'mono', rows: String(f.rows || 3), 'aria-label': f.label, spellcheck: 'false' })
     : h('input', { type: 'text', inputmode: f.kind === 'number' ? 'numeric' : 'text', 'aria-label': f.label, class: f.kind === 'number' ? 'num-in' : 'mono', autocomplete: 'off', spellcheck: 'false' });
-  input.addEventListener('input', () => { answer[f.id] = f.kind === 'number' ? parseWhole(input.value) : input.value; });
+  input.addEventListener('input', () => { answer[f.id] = f.kind === 'number' ? (f.decimal ? parseDecimal(input.value) : parseWhole(input.value)) : input.value; });
   const note = h('span', { class: 'field-note' });
   const el = h('div', { class: ['field', `field-${f.kind}`] }, h('label', { class: 'field-label' }, f.label, input), note);
+  const isEmpty = () => (f.kind === 'number' ? answer[f.id] === null || answer[f.id] === undefined : !String(answer[f.id] ?? '').trim());
   return {
     el, focus: () => input.focus(),
     lock(st, key) { input.readOnly = true; markNote(note, st, key, (k) => String(k)); },
+    isEmpty,
+    get emptyMessage() {
+      if (f.kind !== 'number') return `Type your answer for “${f.label}”.`;
+      return input.value.trim() ? (f.decimal ? 'Type a number in denary, such as 11 or 11.25.' : 'Type a whole number in denary, such as -56.') : `Type a number for “${f.label}”.`;
+    },
   };
 }
 
@@ -346,6 +375,14 @@ export function parseWhole(text) {
   if (!/^-?\d+$/.test(t)) return null;
   const n = Number(t);
   return Number.isSafeInteger(n) ? n : BigInt(t);
+}
+
+/** decimals allowed (e.g. a shift "value" answer of 11.25); otherwise null */
+export function parseDecimal(text) {
+  const t = String(text).trim().replace(/[−–]/g, '-').replace(/[\s_]/g, '');
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function sameValue(a, b) {

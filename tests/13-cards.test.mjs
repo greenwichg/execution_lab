@@ -796,7 +796,7 @@ test('paste: awkward programs never crash, whatever the prediction and the repli
   // runtime errors and limits are CErrors with a line, never a crash
   for (const [src, kind, line] of [
     ['int z = 0;\nint y = 5 / z;', 'runtime', 2], ['int x;\nprintf("%d\\n", x);', 'runtime', 2],
-    ['int m = -2147483647 - 1;\nint q = m / -1;', 'runtime', 2], ['int x = 0;\nwhile (1)\n  x = x + 1;', 'limit', 3],
+    ['int m = -2147483647 - 1;\nint d = -1;\nint q = m / d;', 'runtime', 3], ['int x = 0;\nwhile (1)\n  x = x + 1;', 'limit', 3],
     ['int x = ;', 'syntax', 1], ['#$%^&*', 'syntax', 1],
   ]) assert.throws(() => analyzePaste(src), (e) => e instanceof CError && e.kind === kind && e.line === line, src);
 });

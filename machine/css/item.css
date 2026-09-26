@@ -3,6 +3,7 @@
 .item { --cellw: 2.7rem; --cellh: 2.9rem; }
 .item > * + * { margin-top: 18px; }
 .item-head { gap: 8px; }
+.item-head .chip { white-space: normal; max-width: 100%; }
 .item-prompt { font-size: clamp(1.15rem, 1rem + .6vw, 1.45rem); font-weight: 650; max-width: 60ch; }
 .item-actions { margin-top: 22px; }
 .check-hint:empty { display: none; }
@@ -31,11 +32,11 @@
 .bit-cell { position: relative; display: inline-grid; justify-items: center; }
 .bit-cell input.bit-in {
   width: var(--cellw); height: var(--cellh); min-height: 0; padding: 0;
-  border: 1.5px solid var(--line-strong); border-radius: 8px; background: var(--paper);
+  border: 2px solid var(--line-strong); border-radius: 8px; background: var(--paper);
   font: 600 1.45rem/1 var(--mono); text-align: center; color: var(--ink); caret-color: var(--accent);
 }
 .bit-cell input.bit-in:focus { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
-.bit-cell.small input.bit-in { width: 2.05rem; height: 2.05rem; font-size: 1rem; border-style: solid; border-color: var(--line); background: var(--paper-2); }
+.bit-cell.small input.bit-in { width: 2.05rem; height: 2.05rem; font-size: 1rem; border-style: solid; border-color: var(--line-strong); background: var(--paper-2); }
 .bit-cell.optional input.bit-in { border-style: dashed; background: transparent; }
 .bit-glyph { position: absolute; top: -9px; right: -7px; font-size: .78rem; background: var(--paper); border-radius: 50%; padding: 0 2px; line-height: 1.2; }
 .bit-glyph:empty { display: none; }

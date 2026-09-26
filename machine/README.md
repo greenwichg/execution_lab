@@ -72,7 +72,7 @@ python3 -m http.server 8000      # from the repository root
 # open http://localhost:8000/machine/
 ```
 
-Any static host works. The whole app is about 0.5 MB with no dependencies, and
+Any static host works. The whole app is about 0.6 MB (about 0.2 MB gzipped) with no dependencies, and
 it runs on a £200 Chromebook with no GPU.
 
 ## How it's built

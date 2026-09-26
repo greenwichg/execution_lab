@@ -46,13 +46,21 @@ test('home: loads with no network beyond this origin, a strict CSP and a small p
   const csp = await page.getAttribute('meta[http-equiv="Content-Security-Policy"]', 'content');
   assert.match(csp, /connect-src 'none'/);
   assert.match(csp, /script-src 'self'/);
-  // visit every learner route once so their modules load, then total the bytes
-  for (const r of ['/practice/add?level=gcse', '/check', '/review', '/practice/twos?level=alevel', '/practice/sadd?level=csapp']) {
-    await page.evaluate((x) => { location.hash = x; }, r);
-    await page.waitForSelector('main[data-view]:not([data-view="home"])');
+  // the budget (CONTRACTS.md): any one screen ≤ 560 KB of JS + CSS; the whole app ≤ 650 KB
+  const all = new Map();
+  for (const r of ['/', '/practice/add?level=gcse', '/check', '/review', '/teacher', '/board', '/cards', '/card/char-200', '/paste', '/practice/sadd?level=csapp']) {
+    const p2 = await s.context.newPage();
+    await p2.goto(page.url().split('#')[0] + '#' + r);
+    await p2.waitForSelector('main[data-view]');
+    await H.sleep(200);
+    const res = await p2.evaluate(() => performance.getEntriesByType('resource').map((e) => [e.name, e.decodedBodySize || 0]));
+    const bytes = res.reduce((n, [, b]) => n + b, 0);
+    assert.ok(bytes <= 560 * 1024, `${r}: ${Math.round(bytes / 1024)} KB`);
+    res.forEach(([n, b]) => all.set(n, b));
+    await p2.close();
   }
-  const bytes = await page.evaluate(() => performance.getEntriesByType('resource').reduce((n, e) => n + (e.decodedBodySize || 0), 0));
-  assert.ok(bytes < 500 * 1024, `JS + CSS stays under 500 KB (${Math.round(bytes / 1024)} KB)`);
+  const total = [...all.values()].reduce((n, b) => n + b, 0);
+  assert.ok(total <= 650 * 1024, `whole app ${Math.round(total / 1024)} KB`);
   assert.deepEqual(requests.filter((u) => !ORIGIN_OK(u)), [], 'no request leaves the page origin');
   assert.deepEqual(errors, []);
   await s.close();
@@ -99,7 +107,7 @@ test('diagnosis names the first break in working order, and GCSE Why stops at th
   assert.match(text, /1 \+ 1 as 1 with no carry/, text);
   // wrong cells show the right digit underneath
   assert.ok(await page.locator('.bit-cell.st-bad .bit-under:text("0")').count() >= 1);
-  await page.click('button:has-text("Why? ↓")');
+  // on a miss the first layer is already open; deeper is one click at a time
   await page.waitForSelector('.why-layer[data-kind="columns"]');
   await page.click('button:has-text("Deeper ↓")');
   await page.waitForSelector('.why-layer[data-kind="column"]');
@@ -121,7 +129,7 @@ test('A-level Why goes down to the full adder with live wire values', async () =
   await page.click('.field-choice button:has-text("No")');
   await page.click('.confidence button:has-text("Guessing")');
   await page.click('button:has-text("Check answer")');
-  await page.click('button:has-text("Why? ↓")');
+  await page.waitForSelector('.why-layer');
   for (let i = 0; i < 4; i++) { const d = await page.$('button:has-text("Deeper ↓")'); if (!d) break; await d.click(); }
   await page.waitForSelector('.why-layer[data-kind="adder"] svg.adder-svg');
   const label = await page.getAttribute('svg.adder-svg', 'aria-label');
@@ -167,13 +175,28 @@ test('result-only answers are located with checkpoint questions (≤ 3), then di
 test('practice: a session records misses for spaced review, and the review link restores them elsewhere', async () => {
   const s = await H.openMachine('/practice/add?level=gcse', { width: 1366, height: 900 });
   const { page, errors } = s;
-  // answer three questions with an empty grid (always wrong), moving on each time
+  // an empty grid is refused with a hint (a blank is not a prediction)
+  await page.waitForSelector('.item .confidence button:not([disabled])');
+  await page.click('.item .confidence button:has-text("Guessing")');
+  await page.click('button:has-text("Check answer")');
+  assert.match(await page.textContent('.check-hint'), /Fill in every bit/);
+  assert.equal(await page.$('.bit-cell.locked'), null);
+  // answer three questions with a nonsense result (all ones except bit 0), moving on each time
+  let wrong = 0;
   for (let q = 0; q < 3; q++) {
     await page.waitForSelector('.item .confidence button:not([disabled])');
+    const cells = page.locator('.ag-res input:not([aria-label^="Extra"])');
+    const n = await cells.count();
+    for (let k = 0; k < n; k++) await cells.nth(k).fill(k === n - 1 ? '0' : '1');
+    const yes = page.locator('.item .field-choice button:has-text("No")');
+    if (await yes.count()) await yes.first().click();
     await page.click('.item .confidence button:has-text("Guessing")');
     await page.click('button:has-text("Check answer")');
+    await page.waitForSelector('.item-next button');
+    if (await page.$('.callout.bad, .neutral-line:has-text("correct answer")')) wrong++;
     await page.click('.item-next button:has-text("Next question")');
   }
+  assert.ok(wrong >= 1, 'at least one miss');
   const st = await page.evaluate(() => JSON.parse(localStorage.getItem('pm.sched')));
   assert.ok(st.queue.length >= 1, 'misses go into the review queue');
   await page.evaluate(() => { location.hash = '/review'; });

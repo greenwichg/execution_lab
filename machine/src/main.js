@@ -1,7 +1,7 @@
 // Predict the Machine — boot + hash router.
 // Each route lazily imports one view module exporting render(el, ctx) and
 // optionally dispose(). Unknown or failing routes show a friendly page.
-import { h, replace, focus } from './lib/dom.js';
+import { h, replace, focus, keptQuery } from './lib/dom.js';
 
 const ROUTES = [
   ['/', () => import('./ui/views/home.js')],
@@ -49,11 +49,13 @@ const app = {
   token: 0,
   nav(path, { replace: rep = false } = {}) {
     const p = path.startsWith('/') ? path : `/${path}`;
-    if (rep) history.replaceState(null, '', `${location.pathname}${location.search}#${p}`);
+    if (rep) history.replaceState(null, '', `${location.pathname}${keptQuery()}#${p}`);
     else location.hash = p;
     if (rep) this.route();
   },
   async route() {
+    // in-page anchors (the skip link's #app) are not routes
+    if (location.hash && !location.hash.startsWith('#/')) return;
     const token = ++this.token;
     const { path, query } = parseHash();
     const m = match(path);
@@ -80,6 +82,8 @@ const app = {
     }
     if (token === this.token) {
       window.scrollTo(0, 0);
+      const h1 = el.querySelector('h1')?.textContent?.trim();
+      document.title = h1 && h1 !== 'Predict the Machine' ? `${h1} · Predict the Machine` : 'Predict the Machine';
       const heading = el.querySelector('h1');
       if (heading) { heading.setAttribute('tabindex', '-1'); focus(heading); }
     }
@@ -108,6 +112,13 @@ function failed(e) {
 
 export function boot() {
   app.root = document.getElementById('app');
+  // "Skip to content" moves focus to the page's heading without changing the route
+  document.querySelector('a.skip')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const t = app.root.querySelector('h1') || app.root;
+    t.setAttribute('tabindex', '-1');
+    focus(t);
+  });
   addEventListener('hashchange', () => app.route());
   app.route();
   window.__pm = app;                 // for tests

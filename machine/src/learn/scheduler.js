@@ -72,24 +72,31 @@ export const itemKey = (type, params) => `${typeId(type)}:${(params || []).join(
 /** further along the ladder wins; finished beats unfinished */
 const ahead = (a, b) => (!!a.done - !!b.done) || (a.stage - b.stage) || (a.due - b.due);
 
+/** 'drill' | 'holdout' | 'set' (set questions: spaced like drill, never evidence) */
+const GROUPS = ['drill', 'holdout', 'set'];
+const groupOf = (g) => (GROUPS.includes(g) ? g : 'drill');
+
 /**
  * A queue entry saved by an older build (or damaged storage) → the current
- * shape, or null when it cannot be used. The key is always recomputed, so an
- * entry saved without one cannot sneak in beside its twin.
+ * shape, or null when it cannot be used (including one that no longer builds
+ * into a question, or has a day a review link cannot carry). The key is always
+ * recomputed, so an entry saved without one cannot sneak in beside its twin.
  */
 function normEntry(raw) {
   if (!isObj(raw)) return null;
   const type = typeId(raw.type);
-  if (type < 0 || type >= TYPE_NAMES.length || !okParams(raw.params) || !isDay(raw.due)) return null;
+  if (type < 0 || type >= TYPE_NAMES.length || !okParams(raw.params) || !isDay(raw.due) || raw.due < 0) return null;
+  const key = itemKey(type, raw.params);
+  if (!buildableKey(key, type, raw.params)) return null;
   const stage = Math.min(REVIEW_DAYS.length - 1, Math.max(0, Number.isInteger(raw.stage) ? raw.stage : 0));
   const tag = toTagIdx(raw.tag ?? 0);
   return {
     ...raw,
-    key: itemKey(type, raw.params), type, params: raw.params.slice(),
+    key, type, params: raw.params.slice(),
     tag: Number.isInteger(tag) && tag >= 0 && tag <= MAX_TAG ? tag : 0,
-    group: raw.group === 'holdout' ? 'holdout' : 'drill',
+    group: groupOf(raw.group),
     stage, due: raw.due,
-    miss: isDay(raw.miss) ? raw.miss : raw.due - REVIEW_DAYS[0],
+    miss: isDay(raw.miss) && raw.miss >= 0 ? raw.miss : Math.max(0, raw.due - REVIEW_DAYS[0]),
     done: isDay(raw.done) ? raw.done : null,
     measured: !!raw.measured, reviews: count(raw.reviews), lapses: count(raw.lapses),
   };
@@ -194,17 +201,22 @@ export function recordAttempt(state, { type, params, correct, tag = null, target
   else {
     bumpTag(tags, tag, false);
     if (aimed !== tag) bumpTag(tags, aimed, false);
-    const t = tag || aimed;
-    if (t) misses[t] = (misses[t] || 0) + 1;
+    // Only a diagnosis is evidence of a misconception: an empty or unclassified
+    // answer on an item aimed at a tag is not a second miss of that tag.
+    if (tag) misses[tag] = (misses[tag] || 0) + 1;
   }
 
   if (isReview && entry && !entry.done) {
     let next = reviewed(entry, correct, day);
     // The first review at least a week after the miss is the evidence for
     // drill vs holdout: did full feedback at the time make it stick?
+    // Set questions are spaced like drill but never count: their feedback was
+    // chosen by the set, not by the practice holdout.
     if (!entry.measured && day - entry.miss >= MEASURE_AFTER) {
-      const g = evidence[entry.group] ? entry.group : 'drill';
-      evidence[g] = { right: evidence[g].right + (correct ? 1 : 0), total: evidence[g].total + 1 };
+      if (entry.group === 'drill' || entry.group === 'holdout') {
+        const g = entry.group;
+        evidence[g] = { right: evidence[g].right + (correct ? 1 : 0), total: evidence[g].total + 1 };
+      }
       next = { ...next, measured: true };
     }
     queue[at] = next;
@@ -214,7 +226,7 @@ export function recordAttempt(state, { type, params, correct, tag = null, target
     if (t < 0 || t >= TYPE_NAMES.length) throw new RangeError(`recordAttempt: unknown item type ${type}`);
     // refuse here rather than save something that breaks every later review link
     if (!okParams(params)) throw new RangeError('recordAttempt: params must be encodeParams ints (0 or more)');
-    const g = group === 'holdout' ? 'holdout' : 'drill';
+    const g = groupOf(group);
     if (entry && !entry.done) {
       // Missed again before it was due: this miss (and the feedback it got
       // now) is what a later review measures, so restart the evidence clock
@@ -278,6 +290,20 @@ function guessMiss(stage, due) {
  * width (w drives array sizes: w = 10^9 would hang the tab) and build.
  */
 function buildable(type, params) {
+  return buildableKey(itemKey(type, params), type, params);
+}
+
+// normEntry runs on every read of the state, so remember each key's answer.
+const BUILDABLE = new Map();
+function buildableKey(key, type, params) {
+  if (BUILDABLE.has(key)) return BUILDABLE.get(key);
+  const ok = tryBuild(type, params);
+  if (BUILDABLE.size >= 2000) BUILDABLE.clear();
+  BUILDABLE.set(key, ok);
+  return ok;
+}
+
+function tryBuild(type, params) {
   const mod = typeById(type);
   if (!mod) return false;
   try {
@@ -295,17 +321,21 @@ function buildable(type, params) {
 /**
  * Import entries from a review link. An entry already on this device keeps
  * whichever copy is further along the ladder; finished entries stay finished.
- * Entries that cannot be rebuilt into a question are skipped.
+ * Entries that cannot be rebuilt into a question are dropped. Importing never
+ * removes anything already on the device: once the queue holds MAX_QUEUE
+ * entries, the rest are not added and are counted in `skipped`.
+ * → { state, added (entries actually kept), skipped (new entries left out because the queue is full) }
  */
 export function mergeQueue(state, entries, today) {
   const s = norm(state);
   const queue = s.queue.slice();
   const day = toDay(today ?? new Date());
   let added = 0;
+  let skipped = 0;
   for (const raw of Array.isArray(entries) ? entries : []) {
     if (!isObj(raw)) continue;
     const type = typeId(raw.type);
-    if (type < 0 || type >= TYPE_NAMES.length || !okParams(raw.params) || !isDay(raw.due)) continue;
+    if (type < 0 || type >= TYPE_NAMES.length || !okParams(raw.params) || !isDay(raw.due) || raw.due < 0) continue;
     const key = itemKey(type, raw.params);
     const stage = Math.min(REVIEW_DAYS.length - 1, Math.max(0, Number.isInteger(raw.stage) ? raw.stage : 0));
     // A real link is made on or before today, when the entry was due at most
@@ -318,16 +348,17 @@ export function mergeQueue(state, entries, today) {
       continue;
     }
     if (!buildable(type, raw.params)) continue;
+    if (queue.length >= MAX_QUEUE) { skipped++; continue; }
     const tag = toTagIdx(raw.tag ?? 0);
-    const miss = Math.min(day, guessMiss(stage, due));
+    const miss = Math.max(0, Math.min(day, guessMiss(stage, due)));
     queue.push({
       key, type, params: raw.params.slice(), tag: Number.isInteger(tag) && tag >= 0 && tag <= MAX_TAG ? tag : 0,
-      group: raw.group === 'holdout' ? 'holdout' : 'drill', stage, due, miss,
+      group: groupOf(raw.group), stage, due, miss,
       done: null, measured: stage >= 2, reviews: 0, lapses: 0,
     });
     added++;
   }
-  return { state: { ...s, queue: capQueue(queue) }, added };
+  return { state: { ...s, queue }, added, skipped };
 }
 
 // ---------------------------------------------------------------------------

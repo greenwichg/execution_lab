@@ -725,6 +725,13 @@ export function compile(src, opts = {}) {
     if (fitsImm32(s)) return emit('mov', RN[r][8], Number(s));
     return emit('movabs', RN[r][8], s);
   }
+  /** the value of a literal, or of a cast of one (which gcc folds), else null */
+  function constOf(e) {
+    e = norm(e);
+    if (e.k === 'num') return e.v;
+    if (e.k === 'cast') { const v = constOf(e.e); return v === null ? null : wrapTo(v, e.to); }
+    return null;
+  }
   /** a right operand that can go straight into the instruction (constant or same-size variable) */
   function simpleOperand(e, t) {
     e = norm(e);
@@ -855,6 +862,13 @@ export function compile(src, opts = {}) {
   }
   function genDivide(e, t, info) {
     const r = norm(e.r);
+    // gcc -O0 folds a signed division by the constant -1 into neg (so INT_MIN / -1 wraps to INT_MIN
+    // instead of trapping) and x % -1 into 0; a variable holding -1 still goes through idiv
+    const k = constOf(r);
+    if (t.signed && k !== null && wrapTo(k, t) === -1n) {
+      if (e.op === '/') { genAs(e.l, t); emit('neg', A(t), undefined, undefined, info); } else loadConst('a', 0n, t);
+      return;
+    }
     let src;
     if (r.k === 'var' && lookup(r).size === t.size) { genAs(e.l, t); src = memOf(lookup(r)); }
     else if (r.k === 'num') { genAs(e.l, t); loadConst('c', wrapTo(r.v, t), t); src = C(t); }
@@ -869,6 +883,14 @@ export function compile(src, opts = {}) {
   function genCmp(e) {
     const t = commonType(ty(e.l), ty(e.r)), acc = A(t);
     const rv = simpleOperand(e.r, t);
+    // like gcc -O0, an unsigned a > b or a <= b against a non-constant b is rewritten as b < a or
+    // b >= a: cmp b, a then setb / setae (so CF = 1 exactly when the original test is true for >)
+    if (!t.signed && (e.op === '>' || e.op === '<=') && constOf(e.r) === null) {
+      const info = alu(e.op, t, e, { swapped: true });
+      if (rv !== null) { genAs(e.l, t); emit('cmp', rv, acc, undefined, info); }
+      else { genPair(e.l, e.r, t, t); emit('cmp', C(t), acc, undefined, info); }
+      return e.op === '>' ? 'b' : 'ae';
+    }
     if (rv !== null) { genAs(e.l, t); emit('cmp', acc, rv, undefined, alu(e.op, t, e)); }
     else { genPair(e.l, e.r, t, t); emit('cmp', acc, C(t), undefined, alu(e.op, t, e)); }
     return (t.signed ? CMP_SIGNED : CMP_UNSIGNED)[e.op];

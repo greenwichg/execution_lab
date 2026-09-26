@@ -57,7 +57,8 @@ export function statusGlyph(status) {
 
 /** a callout: kind 'ok' | 'bad' | null */
 export function callout(kind, headline, detail) {
-  return h('div', { class: ['callout', kind], role: kind === 'bad' || kind === 'ok' ? 'status' : null },
+  // no live-region role: callers announce() the outcome once and move focus here
+  return h('div', { class: ['callout', kind] },
     headline ? h('p', { class: 'callout-head' }, headline) : null,
     detail ? h('p', { class: 'callout-body' }, detail) : null);
 }

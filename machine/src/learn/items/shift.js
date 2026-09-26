@@ -92,7 +92,8 @@ export function build(params) {
     : `Do ${kind === 'logical' ? 'a logical' : 'an arithmetic'} shift ${dirWord(dir)} by ${places(k)} on this ${w}-bit number.`;
   const valueAsk = kind === 'arithmetic' ? " Then give its value in denary (read it as two's complement)." : ' Then give its value in denary.';
   const fields = [{ id: 'bits', kind: 'bits', label: 'After the shift', width: w }];
-  if (askValue) fields.push({ id: 'value', kind: 'number', label: 'Value in denary' });
+  // decimal: the ÷2^k myth gives values like 11.25, and the learner must be able to write them.
+  if (askValue) fields.push({ id: 'value', kind: 'number', label: 'Value in denary', decimal: true });
   return {
     type: TYPE,
     params,
@@ -112,7 +113,7 @@ export function blank(item) {
 }
 
 const st = (got, ok) => (got === null || got === undefined || Number.isNaN(got) ? 'missing' : ok ? 'ok' : 'bad');
-const sameValue = (a, b) => typeof a === 'number' && Math.abs(a - b) < 1e-9;
+const sameValue = (a, b) => typeof a === 'number' && Number.isFinite(a) && Math.abs(a - b) < 1e-9;
 
 export function mark(item, answer) {
   const { w } = item.params;
@@ -195,6 +196,10 @@ export function diagnose(item, answer, marking) {
   if (!m.cells.bits.every((s) => s === 'ok')) {
     // Every bit given is right: the answer is unfinished, not a misconception.
     if (!m.cells.bits.includes('bad')) {
+      if (m.cells.bits.every((s) => s === 'missing')) {
+        return finish(null, "You didn't give the shifted bits.",
+          `Nothing was filled in. The answer is ${binStr(item.key.bits)}.`, { field: 'bits', index: firstBad });
+      }
       return finish(null, "You haven't filled in every bit.",
         `The bits you gave are right. The full answer is ${binStr(item.key.bits)}.`, { field: 'bits', index: firstBad });
     }
@@ -295,7 +300,9 @@ export function misconceptions(params, tag) {
     case 'shift_amount': return [k + 1, k - 1].filter((j) => j >= 1 && j < w).map((j) => withValue(shiftBits(X, w, dir, j, kind).bits));
     case 'shift_fill': return [withValue(wrongFill(X, w, dir, k, kind))];
     case 'shift_arith_logical': return [withValue(shiftBits(X, w, dir, k, kind === 'arithmetic' ? 'logical' : 'arithmetic').bits)];
-    case 'shift_value_myth': return mythValues(params).filter((m) => m !== v).slice(0, 1).map((m) => ({ bits: key.slice(), value: m }));
+    // A whole-number myth value first: it is the one a learner is most likely to write.
+    case 'shift_value_myth': return mythValues(params).filter((m) => m !== v)
+      .sort((p, q) => Number.isInteger(q) - Number.isInteger(p)).slice(0, 1).map((m) => ({ bits: key.slice(), value: m }));
     default: return [];
   }
 }
@@ -324,6 +331,7 @@ export function generate(rng, opts = {}) {
   const level = opts.level || null;
   const avoid = opts.avoid || null;
   let fallback = null;
+  let mythFallback = null;
   for (let tries = 0; tries < 600; tries++) {
     let kind = opts.kind === 'mixed' ? pick(rng, KINDS) : KINDS.includes(opts.kind) ? opts.kind : 'logical';
     let dir = DIRS.includes(opts.dir) ? opts.dir : pick(rng, DIRS);
@@ -342,9 +350,15 @@ export function generate(rng, opts = {}) {
     if (avoid && avoid.x === x && avoid.dir === dir && avoid.k === k) continue;
     fallback = fallback || params;
     if (target && !exercises(params, target)) continue;
+    // Prefer a whole-number myth answer (left shifts, or arithmetic right shifts of
+    // negatives): the learner can then show the myth without writing a decimal.
+    if (target === 'shift_value_myth' && tries < 300 && !Number.isInteger(misconceptions(params, target)[0].value)) {
+      mythFallback = mythFallback || params;
+      continue;
+    }
     return params;
   }
-  return fallback;
+  return mythFallback || fallback;
 }
 
 export function variant(item, tagId, rng) {

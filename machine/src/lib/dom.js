@@ -94,16 +94,27 @@ export function download(filename, text, mime = 'text/plain') {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
 }
 
-/** an in-app href that keeps the page's ?query (e.g. ?t=teacher) */
+/**
+ * The only query parameter we ever carry is the optional teacher code ?t=…
+ * (so a static host can count per-teacher use in its access logs). Anything
+ * else an LMS or mail wrapper added (student=, fbclid=, authuser=…) is dropped
+ * so it never spreads into links pupils bookmark or share.
+ */
+export function keptQuery() {
+  const t = new URLSearchParams(location.search).get('t');
+  return t && /^[\w-]{1,32}$/.test(t) ? `?t=${encodeURIComponent(t)}` : '';
+}
+
+/** an in-app href (keeps only ?t=) */
 export function href(path) {
   const p = path.startsWith('/') ? path : `/${path}`;
-  return `${location.pathname}${location.search}#${p}`;
+  return `${location.pathname}${keptQuery()}#${p}`;
 }
 
 /** an absolute link to share (sets, review queues) */
 export function shareUrl(path) {
   const p = path.startsWith('/') ? path : `/${path}`;
-  return `${location.origin}${location.pathname}${location.search}#${p}`;
+  return `${location.origin}${location.pathname}${keptQuery()}#${p}`;
 }
 
 export const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;

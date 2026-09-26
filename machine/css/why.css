@@ -42,7 +42,8 @@
 .cols-grid .c.idx { height: 1.2rem; font-size: .66rem; font-weight: 500; color: var(--muted); }
 .cols-grid .c.carry { height: 1.4rem; font-size: .8rem; color: var(--ink-2); }
 .cols-grid .c.carry.out { color: var(--bad); }
-.cols-grid .c.hl { background: var(--hl); }
+.cols-grid .c.hl { background: var(--hl); box-shadow: inset 2px 0 0 var(--ink-2), inset -2px 0 0 var(--ink-2); }
+.cols-grid .c.idx.hl { color: var(--ink); font-weight: 700; }
 .cols-grid .c.res { border-top: 2px solid var(--ink); }
 .cols-grid .c.lost { color: var(--bad); text-decoration: line-through; text-decoration-thickness: 2px; border-top: 2px solid var(--ink); }
 .cols-grid .c.dropped { color: var(--muted); text-decoration: line-through; border-top: 2px solid var(--ink); }
@@ -104,6 +105,7 @@
 .src-lines { padding: 10px 0; }
 .src-line { display: block; padding: 0 14px; }
 .src-line.focus { background: var(--hl); }
+.src-line.focus .ln { color: var(--ink-2); }
 .src-line .ln { color: var(--muted); user-select: none; }
 
 /* ---------- projector sizes ---------- */

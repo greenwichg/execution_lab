@@ -34,6 +34,7 @@ export function bitRow(w, opts = {}) {
     while (j >= 0 && j < w && cells[j].input.readOnly) j += delta;
     if (j >= 0 && j < w) cells[j].input.focus();
   }
+  rovingTabs(el, cells[(opts.dir || 'right') === 'left' ? 0 : w - 1]?.input);
   return {
     el, cells, values,
     focusStart() { const start = (opts.dir || 'right') === 'left' ? 0 : w - 1; cells[start]?.input.focus(); },
@@ -89,6 +90,17 @@ export function bitInput({ label, value = null, optional = false, onSet, onMove,
       } else if (status === 'ok') input.setAttribute('aria-label', `${label}: correct`);
     },
   };
+}
+
+/**
+ * One tab stop per group of cells (a "roving" tabindex): Tab enters at the
+ * last cell used (initially `first`) and Tab again leaves; arrows move inside.
+ */
+export function rovingTabs(container, first) {
+  const cells = () => [...container.querySelectorAll('input.bit-in')];
+  const make = (cur) => cells().forEach((c) => { c.tabIndex = c === cur ? 0 : -1; });
+  make(first);
+  container.addEventListener('focusin', (e) => { if (e.target.matches?.('input.bit-in')) make(e.target); });
 }
 
 /**
@@ -188,6 +200,7 @@ export function addGrid(item, answer, { carriesField = 'carries', resultField = 
     if (i >= 0 && i < w) resultCells[i].input.focus();
   }
   enableGridNav(grid);
+  rovingTabs(grid, resultCells[0].input);         // one tab stop: enter at bit 0, where you start adding
   const summary = h('p', { class: 'visually-hidden' }, `${item.show.op === '-' ? 'Subtract' : 'Add'} ${bitsMsb(item.show.a)} ${item.show.op === '-' ? 'minus' : 'plus'} ${bitsMsb(item.show.b)}. Type the result from bit 0 (the right-hand end)${asksCarries ? ', and each carry above the column it goes into' : ''}.`);
   const hint = h('p', { class: 'grid-hint small muted' }, asksCarries
     ? 'Type 0 or 1, starting at the right. After each bit the cursor jumps to the carry it makes — type 1, or 0 for no carry. Arrow keys move around.'
@@ -196,6 +209,7 @@ export function addGrid(item, answer, { carriesField = 'carries', resultField = 
   return {
     el,
     focusStart() { resultCells[0].input.focus(); },
+    focusResult(i) { (resultCells[i] || resultCells[0]).input.focus(); },
     lock(marking, key) {
       const cm = marking.cells[carriesField] || [];
       const rm = marking.cells[resultField] || [];

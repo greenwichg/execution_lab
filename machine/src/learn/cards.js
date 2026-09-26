@@ -47,6 +47,21 @@ function eventOn(ctx, line, re, nth = 0) {
 }
 const instOf = (ctx, ev) => ctx.prog.insts[ev.i];
 
+/** column labels for a compare's adder window, in cmp order */
+const columnLabels = (o) => ({ a: `${o.x}, bits 31–24`, b: `~${o.y}, bits 31–24`, r: `${o.sub}, bits 31–24` });
+
+/**
+ * The operand order of a compare: like gcc -O0, the lab compiler turns an unsigned a > b
+ * (b not a constant) into b < a, so it runs cmp b, a. Returns the names in cmp order,
+ * the unsigned values in that order and the phrase for the subtraction.
+ */
+function cmpOrder(ctx, cmp, ua, ub) {
+  const swapped = !!(instOf(ctx, cmp).alu && instOf(ctx, cmp).alu.swapped);
+  const [x, y] = swapped ? ['b', 'a'] : ['a', 'b'];
+  const [ux, uy] = swapped ? [ub, ua] : [ua, ub];
+  return { swapped, x, y, ux, uy, sub: `${x} − ${y}`, ins: `cmp ${x}, ${y}` };
+}
+
 // ---------------------------------------------------------------------------
 // The cards, in CS:APP section order
 // ---------------------------------------------------------------------------
@@ -118,7 +133,10 @@ const DEFS = [
       const cmp = eventOn(ctx, 3, /^cmp/);
       const set = eventOn(ctx, 3, /^set/);
       const signedAns = op === '<' ? Number(-k < m) : Number(-k > m);
-      return { line: 3, cmp, hot: set, ua, signedAns, set: set.text.split(' ')[0], sset: op === '<' ? 'setl' : 'setg', truth: op === '<' ? ua < m : ua > m };
+      return {
+        line: 3, cmp, hot: set, ua, signedAns, set: set.text.split(' ')[0], sset: op === '<' ? 'setl' : 'setg',
+        truth: op === '<' ? ua < m : ua > m, order: cmpOrder(ctx, cmp, ua, m),
+      };
     },
     prompt: () => 'What does this program print (gcc -O0 on x86-64)?',
     because: (c) => `a ${c.vals.op} b mixes int and unsigned int, so a is converted to unsigned int first: -${c.vals.k} becomes ${c.ua}. ${c.ua} ${c.vals.op} ${c.vals.m} is ${c.truth ? 'true' : 'false'}, so it prints ${c.out}.`,
@@ -127,7 +145,7 @@ const DEFS = [
       text: `The usual arithmetic conversions (C11 6.3.1.8) convert the int to unsigned int, and C11 6.3.1.3p2 turns -${c.vals.k} into ${c.ua}. The comparison is then between two unsigned values, so the result is fully defined.`,
     }),
     // checked against gcc 13 -O0: for unsigned a > b gcc swaps the operands (cmp b, a) and
-    // uses setb, while this lab's compiler keeps the order and uses seta; both give the same answer
+    // uses setb, and so does this lab's compiler (the Why layers show the same order)
     gcc: (c) => (c.vals.op === '<'
       ? `gcc compares with cmp a, b and turns the flags into 0 or 1 with setb, an unsigned test that reads CF, which gives ${c.out}. A signed comparison would have used setl instead.`
       : `gcc rewrites a > b as b < a, so it runs cmp b, a and then setb, an unsigned test that reads CF, which gives ${c.out}. A signed comparison would have used setg instead.`),
@@ -145,18 +163,23 @@ const DEFS = [
     layers(c) {
       const { k, m, op } = c.vals;
       const f = c.cmp.flagsAfter;
-      const setWhy = op === '<'
-        ? `CF = ${f.CF}: read as unsigned, ${c.ua} − ${m} needs no borrow, so setb gives ${c.out}.`
-        : `CF = ${f.CF} and ZF = ${f.ZF}: read as unsigned, ${c.ua} − ${m} needs no borrow and is not 0, so seta gives ${c.out}.`;
+      const o = c.order;
+      const borrow = f.CF ? 'needs a borrow' : 'needs no borrow';
+      const setWhy = c.set === 'seta'
+        ? `CF = ${f.CF} and ZF = ${f.ZF}: read as unsigned, ${o.ux} − ${o.uy} ${borrow}${f.ZF ? ' and is 0' : ' and is not 0'}, so seta gives ${c.out}.`
+        : `CF = ${f.CF}: read as unsigned, ${o.ux} − ${o.uy} ${borrow}, so ${c.set} gives ${c.out}.`;
       const cw = columnsWindow(c.prog, c.cmp, 24);
       return [
         lineLayer(c.src, 3, [
           `a ${op} b compares an int with an unsigned int, so C first converts a to unsigned: -${k} becomes ${c.ua}.`,
           `So the question the machine answers is ${c.ua} ${op} ${m}.`,
         ]),
-        asmLayer(c.prog, { lines: 3, hot: instOf(c, c.hot).i, upto: instOf(c, c.hot).i + 1, say: [
+        asmLayer(c.prog, { lines: 3, hot: instOf(c, c.hot).i, upto: instOf(c, c.hot).i + 1, say: o.swapped ? [
+          `Like gcc, this compiler tests a > b as b < a: cmp b, a works out b − a only to set the flags, then ${c.set} turns them into 0 or 1.`,
+          `${c.set} ("set if below") is an unsigned test that reads only CF, while a signed comparison would keep the order and use ${c.sset}, which reads ZF, SF and OF.`,
+        ] : [
           `cmp works out a − b only to set the flags, then ${c.set} turns them into 0 or 1.`,
-          `${c.set} ("set if ${op === '<' ? 'below' : 'above'}") is an unsigned test that reads CF${op === '>' ? ' and ZF' : ''}, while the signed ${c.sset} would read ${op === '>' ? 'ZF, SF and OF' : 'SF and OF'}.`,
+          `${c.set} ("set if ${c.set === 'seta' ? 'above' : 'below'}") is an unsigned test that reads CF${c.set === 'seta' ? ' and ZF' : ''}, while the signed ${c.sset} would read ${op === '>' ? 'ZF, SF and OF' : 'SF and OF'}.`,
         ] }),
         regsLayer(c.cmp, [
           `cmp changes no register: eax still holds ${hexOf(-k, 32)}, the bits of -${k}.`,
@@ -164,9 +187,9 @@ const DEFS = [
         ]),
         flagsLayer(c.prog, c.cmp, [setWhy, `A signed test would see SF = ${f.SF} and OF = ${f.OF} and answer ${c.signedAns} instead.`]),
         columnsLayer(c.prog, c.cmp, 24, [
-          `This is the top byte (bits 31–24) of a + ~b + 1, which is how the ALU subtracts; a carry of ${cw.carries[0]} comes in from bit 23.`,
+          `This is the top byte (bits 31–24) of ${o.x} + ~${o.y} + 1, which is how the ALU subtracts; a carry of ${cw.carries[0]} comes in from bit 23.`,
           `The carry out of bit 31 is ${cw.cout}, and after a subtraction CF is its opposite, so CF = ${f.CF}.`,
-        ]),
+        ], { labels: columnLabels(o) }),
         adderLayer(c.prog, c.cmp, 31, signAdderSay(c.prog, c.cmp)),
       ];
     },
@@ -688,12 +711,14 @@ const DEFS = [
       const cmp = eventOn(ctx, 3, /^cmp/);
       const jmp = eventOn(ctx, 3, /^j(?!mp)/);
       const j = jmp.text.split(' ')[0];
-      const f = cmp.flagsAfter;
-      const sj = { jae: 'jge', jbe: 'jle', jb: 'jl', ja: 'jg' }[j];
-      const signedTaken = sj === 'jge' ? f.SF === f.OF : sj === 'jle' ? (f.ZF === 1 || f.SF !== f.OF) : null;
       const ua = 2 ** 32 - k;
+      const order = cmpOrder(ctx, cmp, ua, m);
+      // the jump a signed comparison would use: it keeps the order (cmp a, b), so a < b skips with
+      // jge and a > b with jle; it jumps (skips the first message) when the signed test is false
+      const sj = op === '<' ? 'jge' : 'jle';
+      const signedTaken = !(op === '<' ? -k < m : -k > m);
       return {
-        line: 3, cmp, hot: jmp, j, sj, ua, taken: takenOf(ctx, jmp),
+        line: 3, cmp, hot: jmp, j, sj, ua, taken: takenOf(ctx, jmp), order,
         signedTaken, msgs: op === '<' ? ['less', 'not less'] : ['greater', 'not greater'], truth: op === '<' ? ua < m : ua > m,
       };
     },
@@ -717,15 +742,17 @@ const DEFS = [
       { prompt: `For the test, a is converted to unsigned int. What value does -${c.vals.k} become?`, input: { kind: 'number' }, answer: c.ua,
         tag: 'c_usual_conversions', headline: `You missed what -${c.vals.k} becomes as an unsigned int.`,
         detail: `Converting a negative int to unsigned adds 2^32 (4294967296), so -${c.vals.k} becomes ${c.ua}.` },
-      { prompt: 'Straight after cmp a, b (which works out a − b), what is CF?', input: { kind: 'bit' }, answer: c.cmp.flagsAfter.CF,
+      { prompt: `Straight after ${c.order.ins} (which works out ${c.order.sub}), what is CF?`, input: { kind: 'bit' }, answer: c.cmp.flagsAfter.CF,
         tag: 'flags_sub_carry', headline: 'You misread CF after cmp.',
-        detail: `cmp subtracts b from a, and CF is the borrow: read as unsigned, ${c.ua} − ${c.vals.m} needs none, so CF = 0.` },
+        detail: `cmp subtracts ${c.order.y} from ${c.order.x}, and CF is the borrow: read as unsigned, ${c.order.ux} − ${c.order.uy} ${c.cmp.flagsAfter.CF ? 'needs one' : 'needs none'}, so CF = ${c.cmp.flagsAfter.CF}.` },
     ],
+    // used only when at least one checkpoint was answered correctly (see diagnose)
     fallback: (c) => ({ tag: 'c_jump_signedness', headline: 'You know the pieces; put them together.',
       detail: `${c.j} ${c.taken ? 'is taken' : 'is not taken'} because CF = ${c.cmp.flagsAfter.CF}, so the program prints "${c.out}".` }),
     layers(c) {
       const { k, m, op } = c.vals;
       const f = c.cmp.flagsAfter;
+      const o = c.order;
       const cw = columnsWindow(c.prog, c.cmp, 24);
       const ins = instOf(c, c.hot);
       return [
@@ -734,21 +761,25 @@ const DEFS = [
           `The if therefore tests ${c.ua} ${op} ${m}, which is ${c.truth ? 'true' : 'false'}.`,
         ]),
         asmLayer(c.prog, { lines: 3, hot: ins.i, upto: ins.i, say: [
-          `cmp sets the flags from a − b, then ${c.j} decides whether to skip the "${c.msgs[0]}" branch.`,
-          `${c.j} is an unsigned jump that reads CF${c.j === 'jbe' ? ' and ZF' : ''}, while the signed ${c.sj} would read ${c.sj === 'jle' ? 'ZF, SF and OF' : 'SF and OF'}.`,
+          o.swapped
+            ? `Like gcc, this compiler tests a > b as b < a: cmp b, a sets the flags from b − a, then ${c.j} decides whether to skip the "${c.msgs[0]}" branch.`
+            : `cmp sets the flags from a − b, then ${c.j} decides whether to skip the "${c.msgs[0]}" branch.`,
+          `${c.j} is an unsigned jump that reads CF${c.j === 'jbe' ? ' and ZF' : ''}, while a signed comparison would ${o.swapped ? 'keep the order and ' : ''}use ${c.sj}, which reads ${c.sj === 'jle' ? 'ZF, SF and OF' : 'SF and OF'}.`,
         ] }),
         regsLayer(c.cmp, [
           `cmp changes no register: eax holds ${hexOf(-k, 32)}, the bits of -${k}.`,
           'The flags are its only output.',
         ]),
         flagsLayer(c.prog, c.cmp, [
-          `CF = ${f.CF}${c.j === 'jbe' ? ` and ZF = ${f.ZF}` : ''}: read as unsigned, ${c.ua} − ${m} needs no borrow${c.j === 'jbe' ? ' and is not 0' : ''}, so ${c.j} is ${c.taken ? 'taken' : 'not taken'}.`,
-          `SF = ${f.SF} and OF = ${f.OF}, so the signed ${c.sj} ${c.signedTaken ? 'would have been taken' : 'would not have been taken'}.`,
+          `CF = ${f.CF}${c.j === 'jbe' ? ` and ZF = ${f.ZF}` : ''}: read as unsigned, ${o.ux} − ${o.uy} ${f.CF ? 'needs a borrow' : 'needs no borrow'}${c.j === 'jbe' ? (f.ZF ? ' and is 0' : ' and is not 0') : ''}, so ${c.j} is ${c.taken ? 'taken' : 'not taken'}.`,
+          o.swapped
+            ? `As signed ints -${k} ${op} ${m} is ${c.signedTaken ? 'false' : 'true'}, so the signed ${c.sj} (after cmp a, b) ${c.signedTaken ? 'would have been taken' : 'would not have been taken'}.`
+            : `SF = ${f.SF} and OF = ${f.OF}, so the signed ${c.sj} ${c.signedTaken ? 'would have been taken' : 'would not have been taken'}.`,
         ]),
         columnsLayer(c.prog, c.cmp, 24, [
-          `This is the top byte (bits 31–24) of a + ~b + 1, which is how cmp subtracts; a carry of ${cw.carries[0]} comes in from bit 23.`,
+          `This is the top byte (bits 31–24) of ${o.x} + ~${o.y} + 1, which is how cmp subtracts; a carry of ${cw.carries[0]} comes in from bit 23.`,
           `The carry out of bit 31 is ${cw.cout}, so CF (the borrow, its opposite) is ${f.CF}.`,
-        ]),
+        ], { labels: columnLabels(o) }),
         adderLayer(c.prog, c.cmp, 31, signAdderSay(c.prog, c.cmp)),
       ];
     },
@@ -1021,6 +1052,7 @@ export function diagnose(item, answer, marking, cpAnswers = []) {
     if (c.match(g)) return finish(c.tag, c.headline, c.detail, focus);
   }
   const cps = def.checkpoints(ctx).slice(0, 3);
+  let rightOnes = 0;
   for (let q = 0; q < cps.length; q++) {
     if (q >= cpAnswers.length) {
       const { prompt, input, answer: ans } = cps[q];
@@ -1029,8 +1061,11 @@ export function diagnose(item, answer, marking, cpAnswers = []) {
     const a = cpAnswers[q];
     if (a === null || a === undefined) continue;             // "Not sure" is not evidence
     if (!sameReply(cps[q].input, a, cps[q].answer)) return finish(cps[q].tag, cps[q].headline, cps[q].detail, focus);
+    rightOnes++;
   }
-  if (def.fallback) { const f = def.fallback(ctx); return finish(f.tag, f.headline, f.detail, focus); }
+  // a fallback claims the learner knows the pieces and names a misconception, so it needs
+  // evidence: at least one checkpoint answered correctly ("Not sure" is never evidence)
+  if (def.fallback && rightOnes > 0) { const f = def.fallback(ctx); return finish(f.tag, f.headline, f.detail, focus); }
   return finish('other', 'Not quite.', def.because(ctx), focus);
 }
 
