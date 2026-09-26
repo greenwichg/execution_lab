@@ -16,7 +16,12 @@ import { setNav } from '../nav.js';
 // ------------------------------------------------------------------ class storage (shared with starter.js)
 export function loadClasses() {
   const list = load('classes', []);
-  return Array.isArray(list) ? list.filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && c.id) : [];
+  return Array.isArray(list) ? list.filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && c.id).map(normClass) : [];
+}
+/** a class from an older build or damaged storage: taps an array, taught a plain object, name a string */
+function normClass(c) {
+  const taught = c.taught && typeof c.taught === 'object' && !Array.isArray(c.taught) ? c.taught : {};
+  return { ...c, name: typeof c.name === 'string' ? c.name : 'My class', taught, taps: Array.isArray(c.taps) ? c.taps.filter((t) => t && typeof t === 'object') : [] };
 }
 export const saveClasses = (list) => save('classes', list);
 export const findClass = (id) => loadClasses().find((c) => c.id === id) || null;

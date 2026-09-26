@@ -310,7 +310,10 @@ Card details (cards owner):
   paste checkpoints carry `line` and `event` (= k); `diagnosis.focus = { line, event? }` where `event`
   indexes `analysis.events`. When the trace hits its limit, writes are rebuilt from `res.steps` and
   `finalVars` with `n: null, key: null` (traps found from `aluLog`); `final: true` marks a variable's
-  end value (prompt "What value does x end up with?"). A checkpoint `answer` is a BigInt beyond ±2^53. paste.js also exports the layer kit the cards use (`asmLayer`, `regsLayer`,
+  end value (prompt "What value does x end up with?"). A checkpoint `answer` is a BigInt beyond ±2^53.
+  Writes also carry `header`, `pass`, `entry`, `entries`, `finishes` and `printed`: a for-loop
+  header's init or step is asked about only when that variable is printed or nothing else is left,
+  as "What is i at the start of pass N of the loop on line L?" or "…when the loop on line L finishes?". paste.js also exports the layer kit the cards use (`asmLayer`, `regsLayer`,
   `flagsLayer`, `columnsLayer`, `adderLayer`, `shiftLayer`, `flagReasons`, `normOutput` …).
 - `ctags.js` holds only `c_*` ids; `flags_*` stay in `tags.js`.
 
@@ -325,7 +328,7 @@ export function run(prog, { maxSteps?, trace? = false, traceLimit? = 4000 }) →
 
 ```js
 Program = { src, lines, vars: [{ id, name, type, d, size, line }], insts: [Inst], base }
-Inst = { i, op, text, bytes: number[], addr, size, line, alu?: { op, signed, width } }
+Inst = { i, op, text, bytes: number[], addr, size, line, ctl?: 'init', alu?: { op, signed, width, swapped? } }
 Result = {
   output, ret, exit, count,
   steps: [{ line, writes: [{ v, name, type, val }], out }],
@@ -348,8 +351,14 @@ Engine details (engine owner):
   always unsigned BigInt bit patterns. Events may also carry `write: { d, width,
   val, v }` (a stack store; `v` = var id) and, for div/idiv, `q` and `rem`; `b`
   is absent for `not`. `res.eventsTruncated` is true when `traceLimit` was hit.
-- `Inst.alu = { op, signed, width, node }`: `op` is the C operator (`'+'`,
+- `Inst.alu = { op, signed, width, node, swapped? }`: `op` is the C operator (`'+'`,
   `'<'`, `'>>'`, `'++'`, `'neg'`, `'~'`, `'!'` …) in the type it was computed in.
+  `swapped: true` marks gcc -O0's operand order for an unsigned `>` or `<=` with a
+  non-constant right side (`cmp b, a`, then `setb`/`setae`, `jae`/`jb`): that cmp
+  event's `a` and `b` are then the C operands b and a. `ctl: 'init'` marks a
+  for-loop header's init instructions. Signed division by a literal −1 compiles to
+  `neg` (so `INT_MIN / -1` wraps and `x % -1` is 0, as with gcc -O0); a −1 held in a
+  variable still uses `idiv` and raises SIGFPE.
 - CError kinds: `'syntax'` (unreadable or unsupported C), `'type'` (undeclared or
   redeclared names), `'limit'` (lines, columns, variables, printf values,
   output, 200 000 steps), `'runtime'` (divide error / SIGFPE, or a variable read
@@ -414,8 +423,15 @@ toSigned(v, w), toUnsigned(v, w), range(w, signed) → { min, max }
   95% CI and n.
 
 State API details (state owner). Days are **day numbers** (`dayNumber(date)`,
-the local calendar day counted from 1970-01-01). Store keys: `sched` (scheduler
-state), `classes` (array of class states), `sets` / `arm.<setId>` (UI's choice).
+the local calendar day counted from 1970-01-01). Store keys (all under the `pm.` prefix):
+`sched` (scheduler state); `classes` (array of class states); `sets` (the teacher's
+made sets); `setprog.<code>` (a learner's progress in a set, keyed by the **full** set
+code, not the 10-bit setId); `arm.<code>` (a study set's arm, or the arm a delayed set
+recovered; the older `arm.<setId>` is read only as a fallback); `setindex` (the newest
+100 set codes with progress, used for pruning and to find a delayed set's study
+set); `cards.tried`; `paste.code` (the learner's own program), `paste.linked` (a
+program opened from a share link, until it is edited or kept), `paste.code.prev`
+(the program a kept link replaced). `forgetControl` removes every `pm.*` key.
 
 ```js
 // src/lib/codec.js
@@ -425,6 +441,8 @@ encodeToken({ setId, mode, g1: { right, total }, g2, arm?, tags: [tagId|index…
 decodeToken(str) → { v, setId, mode, g1, g2, arm, tags: [tagId…], right, total, score, code } | { error }
 encodeQueue(entries) → string (Crockford chars only, CRC-checked)   // entries as in the scheduler, only
 decodeQueue(q) → entries                // { type, params, tag, due, stage, group } are read; throws Error(friendly)
+  // per-entry flags: stage·2 (drill), stage·2 + 1 (holdout), 6 + stage ('set'), so a set question
+  // stays a set question on another device and never becomes drill/holdout evidence
 MODES = ['normal','study','delayed'], ARM_UNKNOWN = 2, ARM_NONE = 3
 // src/learn/scheduler.js — every function returns a NEW state (never mutates)
 emptyState(); dayNumber(date?); dayToDate(day); toDay(day|Date) (RangeError otherwise); itemKey(type, params)

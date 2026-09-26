@@ -24,7 +24,9 @@
     --tk-operator: #c9cdd6;
   }
 }
+/* resolved again here: a value taken at :root would keep the dark OS theme's --bad-soft */
 body.projector {
+  --err-soft: var(--bad-soft);
   --tk-keyword: #5c1a8c;
   --tk-type: #0a4a8f;
   --tk-number: #6e3900;
@@ -74,7 +76,7 @@ body.projector {
 .card-nav { gap: 12px; }
 .card-nav-links { gap: 16px; }
 .card-nav a { font-weight: 600; min-height: 44px; display: inline-flex; align-items: center; }
-.card-page .item-before .c-src { margin-top: 2px; }
+.item-card .item-before .c-src { margin-top: 2px; }
 .card-reveal { background: var(--paper); }
 .machine-did { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
 .machine-did-label { font-weight: 650; }

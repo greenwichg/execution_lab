@@ -2,20 +2,25 @@
 // machine did, what the C standard says and what gcc -O0 on x86-64 does,
 // the diagnosis and the Why rail (line → instruction → registers → flags →
 // columns → adder). Misses go into the spaced review queue.
-import { h, href } from '../../lib/dom.js';
+import { h, href, focus, announce } from '../../lib/dom.js';
 import { mulberry32, newSeed, randInt } from '../../lib/rng.js';
 import { CARDS, TYPE_ID, V_MAX, encodeParams } from '../../learn/cards.js';
 import { makeItem } from '../../learn/items/index.js';
 import * as sched from '../../learn/scheduler.js';
-import { chip } from '../parts.js';
-import { mountItem } from '../runner.js';
+import { TAGS } from '../../learn/catalogue.js';
+import { button, chip } from '../parts.js';
+import { mountItem, workedExample } from '../runner.js';
 import { loadSched, saveSched } from '../session.js';
-import { highlightC, stdChip } from '../code.js';
+import { beforePrompt, afterReveal } from '../cardhooks.js';
 import { load, save } from '../../lib/store.js';
 import { setNav } from '../nav.js';
 
 let runner = null;
 let pending = null;          // a first attempt not yet written to the scheduler
+// "Try one like it" opens the variant as a new page; the per-tag miss count
+// (two misses → a worked example) must carry over to it. Any other way in
+// starts a new session.
+let keepSession = false;
 
 function commit(tag) {
   if (!pending) return;
@@ -60,18 +65,6 @@ function variantOf(query) {
   return v >= 0 && v <= V_MAX ? v : 0;
 }
 
-/** what the machine did, in the learner's terms */
-function machineDid(item) {
-  const ask = item.card.ask;
-  const key = item.key;
-  switch (ask.kind) {
-    case 'value': return { label: `${ask.var} holds`, text: String(key.value) };
-    case 'flags': return { label: 'Flags after cmp', text: ['CF', 'ZF', 'SF', 'OF'].map((n) => `${n} = ${key.flags[n]}`).join('  ') };
-    case 'branch': return { label: 'It printed', text: key.branch };
-    default: return { label: 'It printed', text: key.output === '' ? '(nothing)' : key.output };
-  }
-}
-
 export function render(el, ctx) {
   setNav('#/cards');
   const idx = CARDS.findIndex((c) => c.id === ctx.params.id);
@@ -84,6 +77,11 @@ export function render(el, ctx) {
   }
   const card = CARDS[idx];
   const v = variantOf(ctx.query);
+  if (!keepSession) {
+    try { saveSched(sched.resetSession(loadSched(), newSeed())); } catch (e) { console.error(e); }
+  }
+  keepSession = false;
+  let lastTag = null;
   const item = makeItem('card', { id: card.id, v });
   const prev = CARDS[idx - 1] || null;
   const next = CARDS[idx + 1] || null;
@@ -108,30 +106,48 @@ export function render(el, ctx) {
   runner = mountItem(holder, item, {
     mode: 'practice', feedback: 'full', level: 'csapp', showSpec: false,
     nextLabel: 'Next card',
-    beforePrompt(box, it) {
-      box.append(highlightC(it.show.src, { focusLine: it.show.focusLine, label: 'The C program' }));
-    },
-    afterReveal(box, { item: it }) {
-      const did = machineDid(it);
-      const std = it.card.std;
-      box.append(h('section', { class: 'card-reveal panel tight stack-sm', 'aria-label': 'What the machine did' },
-        h('div', { class: 'machine-did' },
-          h('span', { class: 'machine-did-label' }, `${did.label}: `),
-          h('code', { class: 'machine-did-value' }, did.text)),
-        h('p', { class: 'small muted' }, 'Same output as gcc -O0 on x86-64.'),
-        h('p', { class: 'std-line' }, h('strong', null, 'C standard:'), ' ', stdChip(std.status, { prefix: '' }), ' ', std.text),
-        h('p', { class: 'gcc-line' }, h('strong', null, 'gcc -O0 on x86-64:'), ' ', it.card.gcc)));
-    },
+    beforePrompt,
+    afterReveal,
     onDone(r) {
       pending = { params: item.params, correct: r.correct, tag: r.tag };
       if (r.correct) commit();
     },
-    onFinal(r) { commit(r.diagnosis?.tag ?? undefined); },
+    onFinal(r) {
+      lastTag = r.diagnosis?.tag || null;
+      commit(r.diagnosis?.tag ?? undefined);
+    },
     onNext(kind) {
-      if (kind === 'variant') ctx.nav(`/card/${card.id}?v=${newV()}`);
-      else ctx.nav(next ? `/card/${next.id}` : '/cards');
+      if (kind !== 'variant') { ctx.nav(next ? `/card/${next.id}` : '/cards'); return; }
+      const path = `/card/${card.id}?v=${newV()}`;
+      // two misses on the same misconception in this session: study a worked example first
+      if (lastTag && TAGS[lastTag]?.worked) {
+        let state = null;
+        try { state = loadSched(); } catch (e) { console.error(e); }
+        if (state && sched.fading(state, lastTag).showWorked) {
+          try { saveSched(sched.noteWorked(state, lastTag)); } catch (e) { console.error(e); }
+          showWorked(lastTag, path);
+          return;
+        }
+      }
+      keepSession = true;
+      ctx.nav(path);
     },
   });
+
+  function showWorked(tag, path) {
+    const info = TAGS[tag];
+    runner?.destroy();
+    runner = null;
+    const heading = h('h2', { id: 'card-worked-h', tabindex: '-1' }, 'A worked example first');
+    const go = button('Now try one like it', { kind: 'primary', onClick: () => { keepSession = true; ctx.nav(path); } });
+    holder.replaceChildren(h('section', { class: 'card-worked stack', 'aria-labelledby': 'card-worked-h' },
+      heading,
+      h('p', null, `This mistake has caught you twice, so study one step by step. ${info.fix || ''}`.trim()),
+      workedExample(info, item),
+      h('div', { class: 'row' }, go)));
+    focus(heading);
+    announce('A worked example first.');
+  }
 }
 
 export function dispose() {

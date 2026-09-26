@@ -295,12 +295,20 @@ export function decodeToken(str) {
 // them back when the device forgets (shared Chromebooks, private windows).
 // ---------------------------------------------------------------------------
 // varuint stream: version · count · base day, then per entry: type ·
-// (stage·2 + holdout) · tag · due − base · param count · params…; CRC-13 at the end.
+// flags · tag · due − base · param count · params…; CRC-13 at the end.
+// flags: stage·2 for drill, stage·2 + 1 for holdout, 6 + stage for a set
+// question (spaced, but never evidence), so older links read the same.
 const QUEUE_VERSION = 1;
 const QUEUE_MAX = 200;
 const MAX_PARAMS = 16;
 const MAX_TYPE_ID = 5;
 const MAX_STAGE = 2;
+const SET_FLAGS = MAX_STAGE * 2 + 2;              // 6: first flags value for group 'set'
+const groupFlags = (group, stage) => (group === 'set' ? SET_FLAGS + stage : stage * 2 + (group === 'holdout' ? 1 : 0));
+function flagsGroup(flags) {
+  if (flags >= SET_FLAGS) return { stage: flags - SET_FLAGS, group: 'set' };
+  return { stage: flags >> 1, group: flags & 1 ? 'holdout' : 'drill' };
+}
 // Far above any real queue (60 entries ≈ 1,000 characters), and small enough
 // that a pasted megabyte is refused before any work is done on it.
 export const QUEUE_MAX_CHARS = 20000;
@@ -328,7 +336,7 @@ export function encodeQueue(entries) {
   const w = new BitWriter().varuint(QUEUE_VERSION).varuint(list.length).varuint(base);
   list.forEach((e, i) => {
     const params = e.params || [];
-    w.varuint(e.type).varuint((e.stage ?? 0) * 2 + (e.group === 'holdout' ? 1 : 0))
+    w.varuint(e.type).varuint(groupFlags(e.group, e.stage ?? 0))
       .varuint(tags[i]).varuint(e.due - base).varuint(params.length);
     for (const p of params) w.varuint(p);
   });
@@ -358,10 +366,10 @@ export function decodeQueue(q) {
       const tag = r.varuint();
       const due = base + r.varuint();
       const np = r.varuint();
-      if (type > MAX_TYPE_ID || flags > MAX_STAGE * 2 + 1 || tag > 31 || np > MAX_PARAMS || !Number.isSafeInteger(due)) throw new Error('range');
+      if (type > MAX_TYPE_ID || flags > SET_FLAGS + MAX_STAGE || tag > 31 || np > MAX_PARAMS || !Number.isSafeInteger(due)) throw new Error('range');
       const params = [];
       for (let k = 0; k < np; k++) params.push(r.varuint());
-      out.push({ type, params, tag, due, stage: flags >> 1, group: flags & 1 ? 'holdout' : 'drill' });
+      out.push({ type, params, tag, due, ...flagsGroup(flags) });
     }
     // only zero padding (< 1 char) may follow the entries
     if (r.left >= 5 || r.take(r.left) !== 0) throw new Error('trailing');

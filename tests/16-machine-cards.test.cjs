@@ -152,6 +152,90 @@ test('cards: list, every card right, classic mistakes, Why to the deepest layer,
   await s.close();
 });
 
+test('cards: two misses on one misconception bring a worked example before the variant', async () => {
+  const s = await H.openMachine('/card/char-200', { width: 1366, height: 768 });
+  const { page, errors, requests } = s;
+  const sched = () => page.evaluate(() => JSON.parse(localStorage.getItem('pm.sched')));
+  for (let k = 0; k < 2; k++) {
+    await page.waitForSelector('main[data-view="card"] .item-before .c-src');
+    const v = Number((/[?&]v=(\d+)/.exec(await page.evaluate(() => location.hash)) || [])[1] || 0);
+    const item = makeItem('card', { id: 'char-200', v });
+    const n = /char c = (\d+)/.exec(item.show.src)[1];
+    await answerCard(page, item, n);                      // the classic mistake: char holds n
+    await page.waitForSelector('.item-feedback > .callout.bad');
+    const was = await page.evaluate(() => location.hash);
+    await page.click('button:text-is("Try one like it")');
+    if (k === 0) {
+      // the first miss: straight to the variant, and the session carries over to it
+      await H.until(page, (w) => location.hash !== w && !!document.querySelector('main[data-view="card"] .item-before'), was);
+      assert.equal(await page.locator('.card-worked').count(), 0);
+      assert.equal((await sched()).session.misses.c_char_signedness, 1, 'first miss counted');
+      continue;
+    }
+    // the second: a worked example first, on the same page, focused
+    await page.waitForSelector('.card-worked');
+    assert.equal(await page.evaluate(() => location.hash), was);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'card-worked-h');
+    assert.match(await page.textContent('.card-worked > p'), /^This mistake has caught you twice, so study one step by step\./);
+    const steps = await page.$$eval('.card-worked .worked-steps > li', (ls) => ls.map((l) => l.querySelector('strong')?.textContent || ''));
+    assert.ok(steps.length >= 3 && steps.length <= 6 && steps.every(Boolean), steps.join('|'));
+    assert.equal((await sched()).session.misses.c_char_signedness, 2, 'second miss counted');
+    assert.equal((await sched()).session.shown.c_char_signedness, 2, 'noteWorked recorded');
+    await H.shot(page, 'card-worked-1366');
+    await page.click('button:text-is("Now try one like it")');
+    await H.until(page, (w) => location.hash !== w && /^#\/card\/char-200\?v=\d+$/.test(location.hash) && !!document.querySelector('main[data-view="card"] .item-before .c-src'), was);
+  }
+  // a new visit (not a variant) starts a new session
+  await go(page, '/card/uchar-promotion', 'card');
+  assert.deepEqual((await sched()).session.misses, {});
+  assert.deepEqual(errors, []);
+  assert.deepEqual(foreign(requests), []);
+  await s.close();
+});
+
+test('cards in a homework set and in a review show the C program and the C standard / gcc lines', async () => {
+  const { encodeSet, decodeSet, encodeQueue } = await import(M('lib/codec.js'));
+  const { planSet } = await import(M('learn/sets.js'));
+  const { itemForSpec } = await import(M('learn/items/index.js'));
+  const { mulberry32 } = await import(M('lib/rng.js'));
+  const sch = await import(M('learn/scheduler.js'));
+  const { encodeParams } = await import(M('learn/cards.js'));
+  const code = encodeSet({ level: 'csapp', topics: ['c'], n: 5, seed: 12345, mode: 'normal' });
+  const plan = planSet(decodeSet(code), {});
+  const made = itemForSpec(plan[0].spec, mulberry32(plan[0].seed), { level: 'csapp' });
+  assert.equal(made.type, 'card');
+  const item = makeItem(made.type, made.params);
+
+  const s = await H.openMachine(`/set/${code}`, { width: 1366, height: 768 });
+  const { page, errors } = s;
+  await page.click('button:text-is("Start")');
+  await page.waitForSelector('.item-before .c-src');
+  const src = await page.$$eval('.item-before .c-src .cl-t', (ls) => ls.map((l) => l.textContent).join('\n'));
+  assert.equal(src, item.show.src, 'the set shows the card\'s program');
+  assert.equal(await page.locator('.std-line, .gcc-line').count(), 0, 'no labels before Check');
+  await answerCard(page, item, keyOf(item));
+  await page.waitForSelector('.item-feedback .std-line');
+  assert.ok((await page.textContent('.item-feedback .gcc-line')).startsWith('gcc -O0 on x86-64:'));
+  assert.match(await page.textContent('.item-feedback .card-reveal'), /Same output as gcc -O0 on x86-64/);
+
+  // a review of a missed card
+  const today = sch.dayNumber(new Date());
+  const rev = makeItem('card', { id: 'char-200', v: 0 });
+  const st = sch.recordAttempt(sch.emptyState(), { type: 'card', params: encodeParams(rev.params), correct: false, tag: 'c_char_signedness', today: today - 3 });
+  const q = encodeQueue(sch.activeEntries(st));
+  await page.evaluate(() => localStorage.clear());
+  await page.evaluate((r) => { location.hash = r; }, `/review/${q}`);
+  await page.waitForSelector('main[data-view="review"]');
+  await page.click('main[data-view="review"] button:has-text("Start review")');
+  await page.waitForSelector('.item-before .c-src');
+  assert.equal(await page.$$eval('.item-before .c-src .cl-t', (ls) => ls.map((l) => l.textContent).join('\n')), rev.show.src);
+  await answerCard(page, rev, keyOf(rev));
+  await page.waitForSelector('.item-feedback .std-line');
+  assert.ok((await page.textContent('.item-feedback .std-line')).startsWith('C standard:'));
+  assert.deepEqual(errors, []);
+  await s.close();
+});
+
 test('paste: wrong prediction → checkpoints → diagnosis → Why; errors; share links; safety', async () => {
   const s = await H.openMachine('/paste', { width: 1366, height: 768 });
   const { page, errors, requests } = s;

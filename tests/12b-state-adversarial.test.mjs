@@ -825,3 +825,31 @@ test("result codes and the board never rank 'other' as a misconception", () => {
   assert.equal(r.tagCounts[2].count, 3);
   assert.ok(r.tagCounts.slice(0, 2).every((t) => !t.unclassified));
 });
+
+test('review links keep the group: a set question stays a set question on another device, and never becomes evidence', async () => {
+  const add = await import('../machine/src/learn/items/add.js');
+  const day = 20000;
+  let s = sched.emptyState();
+  const groups = ['drill', 'holdout', 'set'];
+  groups.forEach((group, k) => {
+    s = sched.recordAttempt(s, { type: add.TYPE_ID, params: add.encodeParams({ w: 8, a: 150 + k, b: 120, ask: 'full', level: 'gcse' }), correct: false, tag: 'add_no_carry', group, today: day });
+  });
+  // every stage and group survives the link exactly
+  for (const group of groups) {
+    for (let stage = 0; stage <= 2; stage++) {
+      const [e] = codec.decodeQueue(codec.encodeQueue([{ type: 0, params: [8, 1, 2], tag: 3, due: day, stage, group }]));
+      assert.equal(e.group, group);
+      assert.equal(e.stage, stage);
+    }
+  }
+  // links made before 'set' existed read the same: flags 0–5 are unchanged
+  const legacy = codec.decodeQueue(codec.encodeQueue([{ type: 0, params: [1], tag: 0, due: day, stage: 2, group: 'holdout' }]));
+  assert.deepEqual([legacy[0].stage, legacy[0].group], [2, 'holdout']);
+  // on the other device, a correct review a week later counts only for drill and holdout
+  const link = codec.encodeQueue(sched.activeEntries(s));
+  let other = sched.mergeQueue(sched.emptyState(), codec.decodeQueue(link), day).state;
+  assert.deepEqual(other.queue.map((e) => e.group).sort(), ['drill', 'holdout', 'set']);
+  for (const e of other.queue) other = sched.recordAttempt(other, { type: e.type, params: e.params, correct: true, review: true, group: e.group, today: day + 7 });
+  const acc = sched.reviewAccuracy(other);
+  assert.equal(acc.drill.total + acc.holdout.total, 2, 'the set entry is not evidence');
+});

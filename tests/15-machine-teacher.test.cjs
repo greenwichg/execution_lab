@@ -27,11 +27,24 @@ function clean(s, label) {
   assert.deepEqual(foreign, [], `${label}: requests to another origin`);
 }
 
-/** answer every question of an open set via the UI (Guessing, empty answer), with an optional hook after question i */
+/** fill every empty answer field (the runner refuses a blank prediction): 0s, "0" and each control's first choice */
+async function fillAnswer(page) {
+  await page.evaluate(() => {
+    const area = document.querySelector('.item .item-answer');
+    if (!area) return;
+    const put = (i, v) => { i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); };
+    for (const i of area.querySelectorAll('input.bit-in')) if (!i.value && !i.readOnly && !i.closest('.optional')) put(i, '0');
+    for (const i of area.querySelectorAll('input:not(.bit-in), textarea')) if (!i.value && !i.readOnly) put(i, '0');
+    for (const g of area.querySelectorAll('.seg')) if (!g.querySelector('[aria-pressed="true"]')) g.querySelector('button')?.click();
+  });
+}
+
+/** answer every question of an open set via the UI (Guessing, a filler answer), with an optional hook after question i */
 async function runSet(page, n, afterQuestion) {
   for (let i = 0; i < n; i++) {
     await page.waitForSelector('.item .confidence button');
     assert.match(await page.textContent('.item-progress'), new RegExp(`Question ${i + 1} of ${n}`));
+    await fillAnswer(page);
     await page.click('.item .confidence button[data-value="guess"]');
     await page.click('.item-actions .btn.primary');
     // wrong answers with full feedback may ask checkpoints: say "Not sure" until the diagnosis
@@ -201,8 +214,9 @@ test('a normal set: kind error for a bad link, resume after reload, a result cod
       await page.click('text=Carry on from question 3');
     }
   });
-  const prog = await store(page, `setprog.${set.setId}`);
+  const prog = await store(page, `setprog.${set.code}`);
   assert.equal(prog.results.filter(Boolean).length, 5);
+  assert.equal(await store(page, `setprog.${set.setId}`), null, 'stored by the full code, not the 10-bit setId');
   const t = codec.decodeToken(token);
   assert.equal(t.error, undefined, `token decodes: ${token}`);
   assert.equal(t.setId, set.setId);
@@ -214,6 +228,21 @@ test('a normal set: kind error for a bad link, resume after reload, a result cod
   // misses feed the review queue
   const sched = await store(page, 'sched');
   assert.ok(sched && sched.queue.length > 0, 'misses go into the review queue');
+  assert.ok(sched.queue.every((e) => e.group === 'set'), 'set questions are filed as group "set"');
+  // a shared device: reopening the finished set asks before showing anything
+  await page.reload();
+  await view(page, 'set');
+  await page.waitForSelector('.hs-gate');
+  assert.match(await page.textContent('.hs-gate h2'), /^This device already has answers for this set \(finished [^)]+\)\.$/);
+  assert.equal(await page.locator('.copy-value').count(), 0, 'no result code before choosing');
+  await page.click('button:text-is("Show my code")');
+  assert.equal((await page.textContent('.hs-end .copy-value.big')).trim(), token);
+  await page.reload();
+  await page.waitForSelector('.hs-gate');
+  await page.click('button:text-is("Start fresh (I\'m someone else)")');
+  await page.waitForSelector('button:text-is("Start")');
+  assert.equal(await store(page, `setprog.${set.code}`), null, 'Start fresh removes the earlier answers');
+  assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), 'Start');
   clean(s, 'normal set');
   await s.close();
 });
@@ -224,7 +253,7 @@ test('study set assigns and stores the arm; delayed set recovers it from a paste
   const study = codec.decodeSet(studyCode);
   let s = await H.openMachine(`/set/${studyCode}`, { width: 1366, height: 768 });
   let page = s.page;
-  const arm = await store(page, `arm.${study.setId}`);
+  const arm = await store(page, `arm.${study.code}`);
   assert.ok(arm === 0 || arm === 1, `arm stored: ${arm}`);
   assert.doesNotMatch(await page.textContent('main'), /arm|group/i, 'the arm is never shown');
   await page.click('text=Start');
@@ -250,7 +279,9 @@ test('study set assigns and stores the arm; delayed set recovers it from a paste
   await page.fill('#hs-recover', token.toLowerCase());
   await page.click('text=Use this code');
   await page.waitForSelector('.hs-recover .callout.ok');
-  assert.equal(await store(page, `arm.${study.setId}`), arm);
+  // focus moves to the confirmation, not to <body> (the button it replaced is gone)
+  assert.ok(await page.evaluate(() => document.activeElement.matches('.hs-recover .callout.ok')), 'focus on the confirmation');
+  assert.equal(await store(page, `arm.${delayed.code}`), arm);
   await H.shot(page, 'set-recover-1920');
   await page.click('text=Start');
   const t2 = codec.decodeToken(await runSet(page, 5));

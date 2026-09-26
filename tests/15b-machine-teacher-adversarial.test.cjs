@@ -302,9 +302,22 @@ test('starter for an A-level class: signed sums reveal with flags, and a class t
 });
 
 // ---------------------------------------------------------------------------------------------
-/** answer the open question with Guessing and an empty answer; then Next */
+/** fill every empty answer field (the runner refuses a blank prediction): 0s, "0" and each control's first choice */
+async function fillAnswer(page) {
+  await page.evaluate(() => {
+    const area = document.querySelector('.item .item-answer');
+    if (!area) return;
+    const put = (i, v) => { i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); };
+    for (const i of area.querySelectorAll('input.bit-in')) if (!i.value && !i.readOnly && !i.closest('.optional')) put(i, '0');
+    for (const i of area.querySelectorAll('input:not(.bit-in), textarea')) if (!i.value && !i.readOnly) put(i, '0');
+    for (const g of area.querySelectorAll('.seg')) if (!g.querySelector('[aria-pressed="true"]')) g.querySelector('button')?.click();
+  });
+}
+
+/** answer the open question with Guessing and a filler answer; then Next */
 async function answerOne(page, { next = true } = {}) {
   await page.waitForSelector('.item .confidence button');
+  await fillAnswer(page);
   await page.click('.item .confidence button[data-value="guess"]');
   await page.click('.item-actions .btn.primary');
   if (!next) return;
@@ -335,13 +348,13 @@ test('sets on a Chromebook: token decodes to the plan, a reload never double-cou
   await view(page, 'set');
   const sched1 = await store(page, 'sched');
   assert.equal(sched1.queue.length, before + 1, 'the miss on question 3 reached the review queue on reload');
-  assert.match(await page.textContent('main'), /answered 3 of 7/);
+  assert.match(await page.textContent('.hs-gate h2'), /^This device already has answers for this set \(3 of 7 answered, last on [^)]+\)\.$/);
   await page.click('text=Carry on from question 4');
   assert.match(await page.textContent('.item-progress'), /Question 4 of 7/);
   for (let i = 3; i < 7; i++) await answerOne(page);
   await page.waitForSelector('.hs-end .copy-value.big');
   const token = (await page.textContent('.hs-end .copy-value.big')).trim();
-  const prog = await store(page, `setprog.${set.setId}`);
+  const prog = await store(page, `setprog.${set.code}`);
   const expected = codec.encodeToken(sets.summarizeSet(prog.results, plan, { setId: set.setId, mode: 'normal' }));
   assert.equal(token, expected, 'the token is exactly the summary of the stored first attempts');
   const t = codec.decodeToken(token);
@@ -353,10 +366,12 @@ test('sets on a Chromebook: token decodes to the plan, a reload never double-cou
   const queueAfter = (await store(page, 'sched')).queue.length;
   // coming back to the link: same code, nothing recorded twice, no way to redo it
   await page.reload();
+  await page.waitForSelector('.hs-gate');
+  await page.click('button:text-is("Show my code")');
   await page.waitForSelector('.hs-end .copy-value.big');
   assert.equal((await page.textContent('.hs-end .copy-value.big')).trim(), token);
   assert.equal((await store(page, 'sched')).queue.length, queueAfter, 'reopening the set records nothing again');
-  assert.equal(await page.$('text=Start'), null);
+  assert.equal(await page.locator('button:text-is("Start")').count(), 0);
   assert.ok(await contrastOf(page, '.hs-end .copy-value.big') >= 7);
   await H.shot(page, 'adv-set-end-1366');
   clean(s, 'normal set');
@@ -383,7 +398,7 @@ test('study and delayed sets: the arm is never shown or chosen; recovery accepts
   const s = await H.openMachine(`/set/${studyCode}?arm=0`, PHONE);
   const { page } = s;
   const armWords = /\b(arm|group|condition|control)\b/i;
-  const arm = await store(page, `arm.${study.setId}`);
+  const arm = await store(page, `arm.${study.code}`);
   assert.ok(arm === 0 || arm === 1);
   assert.doesNotMatch(await page.textContent('main'), armWords, 'intro never mentions the arm');
   assert.equal(await page.locator('main select, main input[type="radio"]').count(), 0, 'nothing to choose');
@@ -421,12 +436,12 @@ test('study and delayed sets: the arm is never shown or chosen; recovery accepts
     await p2.keyboard.press('Enter');
     await p2.waitForSelector('.hs-recover .callout.bad');
     assert.match(await p2.textContent('.hs-recover .callout.bad'), why, `refused: ${bad}`);
-    assert.equal(await store(p2, `arm.${study.setId}`), null, `nothing stored for ${bad}`);
+    assert.equal(await store(p2, `arm.${delayed.code}`), null, `nothing stored for ${bad}`);
   }
   await p2.fill('#hs-recover', ` ${good.toLowerCase().replace(/-/g, ' ')} `);
   await p2.click('text=Use this code');
   await p2.waitForSelector('.hs-recover .callout.ok');
-  assert.equal(await store(p2, `arm.${study.setId}`), 1);
+  assert.equal(await store(p2, `arm.${delayed.code}`), 1);
   await H.shot(p2, 'adv-set-recovered-1366');
   await p2.click('text=Start');
   for (let i = 0; i < 5; i++) await answerOne(p2);
@@ -446,6 +461,206 @@ test('study and delayed sets: the arm is never shown or chosen; recovery accepts
   clean(s, 'study set');
   clean(s3, 'delayed, skipped');
   await s3.close();
+});
+
+test('set storage by full code: colliding setIds, legacy data, pruning, the linked study arm, shared devices', async () => {
+  const codec = await esm('lib/codec.js');
+  // two real codes with the same 10-bit setId (found by the security review)
+  const A = '81A00000003FSH';
+  const B = '81A00000007ASW';
+  assert.equal(codec.decodeSet(A).setId, codec.decodeSet(B).setId);
+  const s = await H.openMachine(`/set/${A}`, { width: 1366, height: 768 });
+  const { page } = s;
+  await page.click('button:text-is("Start")');
+  for (let i = 0; i < 5; i++) await answerOne(page);
+  await page.waitForSelector('.hs-end .copy-value.big');
+  const tokenA = (await page.textContent('.hs-end .copy-value.big')).trim();
+  await go(page, `/set/${B}`, 'set');
+  await page.click('button:text-is("Start")');
+  await answerOne(page);
+  // set A still has its answers and its code
+  await go(page, `/set/${A}`, 'set');
+  await page.waitForSelector('.hs-gate');
+  assert.match(await page.textContent('.hs-gate h2'), /\(finished /);
+  await page.click('button:text-is("Show my code")');
+  assert.equal((await page.textContent('.hs-end .copy-value.big')).trim(), tokenA);
+  await go(page, `/set/${B}`, 'set');
+  await page.waitForSelector('.hs-gate');
+  assert.match(await page.textContent('.hs-gate h2'), /\(1 of 5 answered/);
+
+  // an older build's setId-keyed progress moves to the code's key only when it is this set's
+  const C = codec.decodeSet(codec.encodeSet({ level: 'gcse', topics: ['add'], n: 5, seed: 31337, mode: 'normal' }));
+  const D = codec.decodeSet(codec.encodeSet({ level: 'gcse', topics: ['add'], n: 5, seed: 31338, mode: 'normal' }));
+  await page.evaluate(([c, d]) => {
+    localStorage.setItem(`pm.setprog.${c.setId}`, JSON.stringify({ code: c.code, results: [{ correct: true, tag: null }], token: null }));
+    localStorage.setItem(`pm.setprog.${d.setId}`, JSON.stringify({ code: 'SOMEOTHERCODE0', results: [{ correct: true, tag: null }], token: null }));
+  }, [C, D]);
+  await go(page, `/set/${C.code}`, 'set');
+  await page.waitForSelector('.hs-gate');
+  assert.equal((await store(page, `setprog.${C.code}`)).results.filter(Boolean).length, 1);
+  assert.equal(await store(page, `setprog.${C.setId}`), null, 'the legacy key is removed once moved');
+  await go(page, `/set/${D.code}`, 'set');
+  await page.waitForSelector('button:text-is("Start")');
+  assert.equal(await page.locator('.hs-gate').count(), 0, 'another set\'s legacy progress is not taken');
+  assert.ok(await store(page, `setprog.${D.setId}`), 'and it is left alone');
+
+  // only the newest 100 sets keep their progress
+  await page.evaluate(() => {
+    const idx = JSON.parse(localStorage.getItem('pm.setindex'));
+    for (let i = 0; i < 100; i++) {
+      const code = `OLD${String(i).padStart(11, '0')}`;
+      idx.push({ code, setId: i, mode: 'normal', t: i });
+      localStorage.setItem(`pm.setprog.${code}`, JSON.stringify({ code, results: [], token: null }));
+    }
+    localStorage.setItem('pm.setindex', JSON.stringify(idx));
+  });
+  await go(page, `/set/${A}`, 'set');
+  await page.waitForSelector('.hs-gate');
+  const idx = await store(page, 'setindex');
+  assert.equal(idx.length, 100);
+  assert.equal(idx[0].code, A, 'newest first');
+  assert.equal(await store(page, 'setprog.OLD00000000099'), null, 'the oldest progress is pruned');
+  assert.ok(await store(page, `setprog.${B}`), 'recent sets keep theirs');
+  clean(s, 'collisions');
+  await s.close();
+
+  // the delayed set finds its study set's arm by setId through the index, or an older build's arm.<setId>
+  const study = codec.decodeSet(codec.encodeSet({ level: 'gcse', topics: ['add', 'shift'], n: 5, seed: 555, mode: 'study' }));
+  const delayed = codec.decodeSet(codec.encodeSet({ level: 'gcse', topics: ['add', 'shift'], n: 5, seed: 556, mode: 'delayed', link: study.setId }));
+  const s2 = await H.openMachine(`/set/${study.code}`, { width: 1366, height: 768 });
+  const p2 = s2.page;
+  const arm = await store(p2, `arm.${study.code}`);
+  assert.ok(arm === 0 || arm === 1);
+  await go(p2, `/set/${delayed.code}`, 'set');
+  await p2.waitForSelector('button:text-is("Start")');
+  assert.equal(await p2.$('#hs-recover'), null, 'the linked arm is found');
+  await p2.click('button:text-is("Start")');
+  for (let i = 0; i < 5; i++) await answerOne(p2);
+  const t = codec.decodeToken((await p2.textContent('.hs-end .copy-value.big')).trim());
+  assert.equal(t.arm, arm, 'the delayed code carries the study arm');
+  // someone else on this device: Start fresh forgets the previous learner's group and offers the paste box
+  await p2.reload();
+  await p2.waitForSelector('.hs-gate');
+  await p2.click('button:text-is("Start fresh (I\'m someone else)")');
+  await p2.waitForSelector('#hs-recover');
+  await p2.click('button:text-is("Start")');
+  for (let i = 0; i < 5; i++) await answerOne(p2);
+  assert.equal(codec.decodeToken((await p2.textContent('.hs-end .copy-value.big')).trim()).arm, codec.ARM_UNKNOWN);
+  // an older build stored the study arm under arm.<setId>
+  await p2.evaluate((d) => { localStorage.clear(); localStorage.setItem(`pm.arm.${d.link}`, '1'); }, delayed);
+  await go(p2, '/', 'home');
+  await go(p2, `/set/${delayed.code}`, 'set');
+  await p2.waitForSelector('button:text-is("Start")');
+  assert.equal(await p2.$('#hs-recover'), null, 'the legacy arm is still found');
+  clean(s2, 'delayed arm');
+  await s2.close();
+});
+
+test('projector digits are at least 48 px at 1366×768 and 1920×1080: reveal, Why rail, board overlay; dark OS stays light', async () => {
+  const codec = await esm('lib/codec.js');
+  const DIGITS = ['.rv-bit', '.rv-carry.on', '.rv-res.on', '.rv-right', '.rv-bitbox', '.cols-grid .c', '.cols-grid .c-right',
+    '.eq-box', '.eq-total', '.sh-bits .c', '.flag-val'].join(', ');
+  /** every element the class must read that has a digit in it and is under 48 px (font size or box height) */
+  const tooSmall = (page, scope) => page.$$eval(`${scope} :is(${DIGITS})`, (els) => els
+    .filter((e) => /\d/.test(e.textContent) && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')
+    .map((e) => ({ t: e.textContent.trim(), cls: e.className, f: parseFloat(getComputedStyle(e).fontSize), h: Math.round(e.getBoundingClientRect().height) }))
+    .filter((x) => x.f < 48 || x.h < 48));
+  const count = (page, scope) => page.$$eval(`${scope} :is(${DIGITS})`, (els) => els.filter((e) => /\d/.test(e.textContent)).length);
+  for (const vp of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
+    const s = await H.openMachine('/', vp);
+    const { page } = s;
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
+    await seedClass(page, { taught: { 'J277-1.2.4-add': (await todayOf(page)) - 14, 'J277-1.2.4-shift': (await todayOf(page)) - 21 } });
+    await go(page, '/starter?class=ctest', 'starter');
+    let checked = 0;
+    for (let q = 0; q < 5; q++) {
+      await page.keyboard.press('Space');
+      await page.waitForSelector('.sr-answer[data-revealed="true"]', { state: 'attached' });
+      for (let k = 0; k < 8; k++) {
+        if (!(await page.$('.sr-whybtn'))) break;
+        await page.keyboard.press('w');
+      }
+      const bad = await tooSmall(page, '.sr-q');
+      assert.deepEqual(bad, [], `question ${q + 1} at ${vp.width}×${vp.height}`);
+      checked += await count(page, '.sr-q');
+      if (q === 0 || (await page.$('.sr-why .cols-grid'))) await H.shot(page, `adv-starter-why-${vp.width}-q${q + 1}`);
+      await page.keyboard.press('ArrowRight');
+    }
+    assert.ok(checked > 60, `measured ${checked} digits`);
+    // the page is light on the projector whatever the OS theme
+    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    assert.equal(bg, 'rgb(255, 255, 255)');
+    // the board's worked-example overlay
+    const tok = (tags) => codec.encodeToken({ setId: 5, mode: 'normal', g1: { right: 3, total: 8 }, g2: { right: 1, total: 2 }, tags });
+    await go(page, '/board', 'board');
+    await page.fill('#bd-codes', [tok(['add_no_carry', 'shift_fill', 'twos_no_plus1']), tok(['flags_sub_carry'])].join('\n'));
+    await page.click('button:text-is("Analyse")');
+    await page.waitForSelector('.bd-bars');
+    const n = await page.locator('.bd-bar button:text-is("Project a worked example")').count();
+    assert.equal(n, 4);
+    for (let i = 0; i < n; i++) {
+      await page.locator('.bd-bar button:text-is("Project a worked example")').nth(i).click();
+      await page.waitForSelector('.wx');
+      assert.deepEqual(await tooSmall(page, '.wx'), [], `overlay ${i + 1} at ${vp.width}×${vp.height}`);
+      assert.ok(await count(page, '.wx') > 5);
+      const soft = await page.evaluate(() => getComputedStyle(document.querySelector('.wx .chip')).backgroundColor);
+      assert.equal(soft, 'rgb(230, 231, 251)', 'projector chips use the light tokens under a dark OS');
+      if (i === 0) await H.shot(page, `adv-board-wx-${vp.width}`);
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.wx', { state: 'detached' });
+    }
+    clean(s, `projector ${vp.width}`);
+    await s.close();
+  }
+});
+
+test('starter survives a stored class whose taps or taught dates are not the right shape', async () => {
+  const s = await H.openMachine('/', { width: 1366, height: 768 });
+  const { page } = s;
+  const day = await todayOf(page);
+  await put(page, 'classes', [{ v: 1, id: 'c1', name: 'Broken', level: 'gcse', taught: { 'J277-1.2.4-add': day - 14 }, taps: {} },
+    { v: 1, id: 'c2', name: 'Broken too', level: 'gcse', taught: [], taps: 'x' }]);
+  await go(page, '/starter?class=c1', 'starter');
+  await page.waitForSelector('.sr-prompt');
+  await page.keyboard.press('Space');
+  await page.keyboard.press('3');
+  await H.until(page, () => Array.isArray(JSON.parse(localStorage.getItem('pm.classes'))[0].taps));
+  await go(page, '/starter?class=c2', 'starter');
+  await page.waitForSelector('.sr-prompt');
+  await page.keyboard.press('Space');
+  await page.keyboard.press('1');
+  await H.until(page, () => JSON.parse(localStorage.getItem('pm.classes'))[1].taps.length === 1);
+  await go(page, '/teacher?class=c2', 'teacher');
+  clean(s, 'damaged classes');
+  await s.close();
+});
+
+test('board: unclassified mistakes are a count after the named ones; mixed normal and study rows say which groups they hold', async () => {
+  const codec = await esm('lib/codec.js');
+  const n1 = codec.encodeToken({ setId: 7, mode: 'normal', g1: { right: 3, total: 5 }, g2: { right: 0, total: 1 }, tags: ['other', 'add_or'] });
+  const n2 = codec.encodeToken({ setId: 7, mode: 'normal', g1: { right: 2, total: 5 }, g2: { right: 1, total: 1 }, tags: ['other'] });
+  const st = codec.encodeToken({ setId: 9, mode: 'study', arm: 1, g1: { right: 4, total: 5 }, g2: { right: 2, total: 5 }, tags: [] });
+  const s = await H.openMachine('/board', { width: 1366, height: 768 });
+  const { page } = s;
+  await page.fill('#bd-codes', [n1, n2, st].join('\n'));
+  await page.click('button:text-is("Analyse")');
+  await page.waitForSelector('.bd-rows');
+  const labels = await page.$$eval('.bd-bar-label', (ls) => ls.map((l) => l.textContent));
+  assert.deepEqual(labels, [(await esm('learn/catalogue.js')).tagLabel('add_or')], 'only named misconceptions are ranked');
+  assert.equal(await page.locator('.bd-bar button').count(), 1, 'a worked example only for the named one');
+  assert.match(await page.textContent('.bd-unclassified'), /^Unclassified mistakes — 2 \(/);
+  // mixed rows: each cell names its own groups
+  assert.equal(await page.textContent('.bd-rows thead th:nth-child(5)'), 'Groups');
+  const cells = await page.$$eval('.bd-rows tbody tr td:nth-child(5)', (tds) => tds.map((t) => t.textContent));
+  assert.deepEqual(cells, ['drill 3/5 · holdout 0/1', 'drill 2/5 · holdout 1/1', 'A 4/5 · B 2/5']);
+  // one mode only: the heading says it
+  await page.fill('#bd-codes', [n1, n2].join('\n'));
+  await page.click('button:text-is("Analyse")');
+  await H.until(page, () => document.querySelector('.bd-rows thead th:nth-child(5)')?.textContent === 'Drill · Holdout');
+  assert.equal(await page.textContent('.bd-rows tbody tr td:nth-child(5)'), '3/5 · 0/1');
+  assert.match(await page.textContent('.bd'), /No named misconceptions came up|Unclassified mistakes — 2/);
+  clean(s, 'board unclassified');
+  await s.close();
 });
 
 // ---------------------------------------------------------------------------------------------

@@ -127,6 +127,12 @@ test('every card end to end: nothing leaks before Check; labels after; Not sure;
     if (i === 3) await H.shot(page, 'cards-adv-variant-why-1366');
     // another like it: the same card, new numbers
     const was = await page.evaluate(() => location.hash);
+    // a variant is offered only for a misconception the card module can aim at ("Not sure" all the
+    // way is no evidence of one); otherwise the learner moves on
+    if (!(await page.locator('button:text-is("Try one like it")').count())) {
+      assert.equal(await page.locator('.item-next button:text-is("Next card")').count(), 1, `${c.id}: Next card offered`);
+      continue;
+    }
     await page.click('button:text-is("Try one like it")');
     await H.until(page, ([w, id]) => location.hash !== w && location.hash.startsWith(`#/card/${id}?v=`) && !!document.querySelector('main[data-view="card"] .item-before'), [was, c.id]);
     assert.doesNotMatch(await page.textContent('main h1'), /\d/);
@@ -479,6 +485,79 @@ test('paste share links: round trip, truncated, tampered, legacy, bidi, restore 
   await H.shot(page, 'paste-adv-link-1366');
   assert.deepEqual(errors, []);
   await s.close();
+});
+
+test('paste share links never overwrite the learner\'s saved program unless they edit or keep it', async () => {
+  const s = await H.openMachine('/paste', { width: 1366, height: 768 });
+  const { page, errors } = s;
+  const stored = (k) => page.evaluate((key) => JSON.parse(localStorage.getItem(`pm.${key}`) || 'null'), k);
+  const MINE = 'int mine = 42;\nprintf("%d\\n", mine);';
+  const OTHER = 'int x = 7;\nprintf("%d\\n", x);';
+  await setCode(page, MINE);
+  assert.equal(await stored('paste.code'), MINE);
+  const link = await page.evaluate(async (c) => (await import('./src/ui/views/paste.js')).sharePath(c), OTHER);
+  const open = async (route) => {
+    await page.evaluate(() => { location.hash = '/cards'; });
+    await page.waitForSelector('main[data-view="cards"]');
+    await page.evaluate((r) => { location.hash = r; }, route);
+    await page.waitForSelector('main[data-view="paste"] #pe-code');
+  };
+  // run the linked program, leave, come back: the learner's own program is still theirs
+  await open(link);
+  assert.equal(await page.inputValue('#pe-code'), OTHER);
+  await run(page, '7', 'Certain');
+  await page.waitForSelector('.paste-result .callout.ok');
+  assert.equal(await stored('paste.code'), MINE, 'running a linked program does not save over mine');
+  assert.equal(await stored('paste.linked'), OTHER);
+  await open('/paste');
+  assert.equal(await page.inputValue('#pe-code'), MINE);
+  // editing the linked program makes it the learner's; the old one is kept as paste.code.prev
+  await open(link);
+  await page.click('#pe-code');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ');
+  assert.equal(await stored('paste.code'), `${OTHER} `);
+  assert.equal(await stored('paste.code.prev'), MINE);
+  assert.equal(await page.locator('button:text-is("Keep this program")').count(), 0);
+  // "Keep this program" does the same, and says so
+  await setCode(page, MINE);
+  await open(link);
+  await page.click('button:text-is("Keep this program")');
+  assert.equal(await stored('paste.code'), OTHER);
+  assert.equal(await stored('paste.code.prev'), MINE);
+  assert.match(await page.evaluate(() => document.activeElement.textContent), /^Kept: this is now your saved program\.$/);
+  // an error with its source never shows the word "null" (bugs #8)
+  await setCode(page, 'int x = (1;');
+  await run(page, 'x', 'Guessing');
+  await page.waitForSelector('.paste-result .pe-error');
+  assert.doesNotMatch(await page.textContent('.paste-result'), /null/);
+  assert.deepEqual(errors, []);
+  await s.close();
+});
+
+test('views never hand null to replaceChildren / append / prepend (it would show as the text "null")', () => {
+  const fs = require('fs');
+  const files = ['views/teacher.js', 'views/starter.js', 'views/set.js', 'views/board.js', 'views/cards.js', 'views/card.js', 'views/paste.js', 'reveal.js', 'code.js', 'cardhooks.js'];
+  const bad = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(__dirname, '../machine/src/ui', f), 'utf8');
+    const re = /\.(replaceChildren|append|prepend|before|after)\(/g;
+    let m;
+    while ((m = re.exec(src))) {
+      // the call's arguments, with nested (…) groups such as h(…) removed: what is left is passed directly
+      let depth = 1, i = re.lastIndex, top = '';
+      for (; i < src.length && depth; i++) {
+        const ch = src[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        if (depth === 1 && ch !== ')') top += ch; else if (depth === 0) break;
+      }
+      // a list filtered before it is spread is fine; so is comparing with null
+      if (/\.filter\b/.test(top)) continue;
+      if (/(^|[^\w.])null\b/.test(top.replace(/[!=]==?\s*null\b/g, ''))) bad.push(`${f}: ${src.slice(m.index, i + 1).slice(0, 120)}`);
+    }
+  }
+  assert.deepEqual(bad, []);
 });
 
 test('phones and projectors: no page scroll, readable code, screenshots', async () => {

@@ -90,8 +90,11 @@ export function render(el, ctx) {
 }
 
 // ---------------------------------------------------------------- misconceptions
+// 'other' means "wrong, but no named misconception": it is a count, not a misconception to reteach
+const isUnclassified = (t) => !!t.unclassified || t.tag === 'other' || !t.tag;
 function tagsSection(r) {
-  const list = r.tagCounts;
+  const list = r.tagCounts.filter((t) => !isUnclassified(t));
+  const unclassified = r.tagCounts.filter(isUnclassified).reduce((n, t) => Math.max(n, t.count), 0);
   return h('section', { class: 'stack', 'aria-labelledby': 'bd-tags-h' },
     h('h2', { id: 'bd-tags-h' }, 'What the class got wrong'),
     list.length
@@ -102,20 +105,27 @@ function tagsSection(r) {
         h('div', { class: 'bd-track', 'aria-hidden': 'true' }, h('div', { class: 'bd-fill', style: { width: `${Math.max(2, Math.round((t.count / Math.max(1, t.of)) * 100))}%` } })),
         TAGS[t.tag]?.fix ? h('p', { class: 'small muted' }, TAGS[t.tag].fix) : null,
         TAGS[t.tag]?.worked ? button('Project a worked example', { small: true, onClick: (e) => openWorked(t.tag, e.currentTarget) }) : null)))
-      : h('p', null, 'No misconceptions came up in these codes.'),
+      : h('p', null, unclassified ? 'No named misconceptions came up in these codes.' : 'No misconceptions came up in these codes.'),
+    unclassified ? h('p', { class: 'bd-unclassified' }, `Unclassified mistakes — ${unclassified}`,
+      h('span', { class: 'small muted' }, ` (codes with a wrong answer that matched no named misconception, out of ${r.rows.length})`)) : null,
     h('p', { class: 'small muted' }, 'Each code lists up to three kinds of mistake from first attempts. A count is how many codes list it.'));
 }
 
 // ---------------------------------------------------------------- rows
+const groupsText = (x, prefix) => (x.mode === 'normal'
+  ? `${prefix ? 'drill ' : ''}${x.g1.right}/${x.g1.total} · ${prefix ? 'holdout ' : ''}${x.g2.right}/${x.g2.total}`
+  : `${prefix ? 'A ' : ''}${x.g1.right}/${x.g1.total} · ${prefix ? 'B ' : ''}${x.g2.right}/${x.g2.total}`);
 function rowsSection(r) {
   const study = r.rows.some((x) => x.mode !== 'normal');
+  // normal rows hold drill · holdout, study rows A · B: when both are pasted, each cell says which
+  const mixed = study && r.rows.some((x) => x.mode === 'normal');
   const shown = r.rows.slice(0, SHOW_MAX);
   return h('section', { class: 'stack-sm', 'aria-labelledby': 'bd-rows-h' },
     h('h2', { id: 'bd-rows-h' }, 'Every code'),
     h('div', { class: 'table-wrap' }, h('table', { class: 'table bd-rows' },
       h('thead', null, h('tr', null,
         h('th', null, 'Line'), h('th', null, 'Code'), h('th', null, 'Set'), h('th', null, 'Score'),
-        h('th', null, study ? 'A · B' : 'Drill · Holdout'),
+        h('th', null, mixed ? 'Groups' : study ? 'A · B' : 'Drill · Holdout'),
         study ? h('th', null, 'Full feedback on') : null,
         h('th', null, 'Misconceptions'), h('th', null, 'Note'))),
       h('tbody', null, shown.map((x) => h('tr', null,
@@ -123,7 +133,7 @@ function rowsSection(r) {
         h('td', { class: 'mono' }, x.code),
         h('td', { class: 'mono' }, `${x.setId}${x.mode !== 'normal' ? ` ${MODE_TEXT[x.mode]}` : ''}`),
         h('td', null, x.total ? `${x.right}/${x.total} (${pct(x.score)})` : '—'),
-        h('td', { class: 'mono' }, `${x.g1.right}/${x.g1.total} · ${x.g2.right}/${x.g2.total}`),
+        h('td', { class: 'mono' }, groupsText(x, mixed)),
         study ? h('td', null, ARM_TEXT[x.arm] || '—') : null,
         h('td', null, x.tags.length ? x.tags.map(tagLabel).join('; ') : '—'),
         h('td', { class: 'small' }, x.dupOf !== null ? `Same as line ${x.dupOf}` : '')))))),

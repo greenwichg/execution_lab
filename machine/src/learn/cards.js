@@ -16,10 +16,6 @@ import {
 export const TYPE = 'card';
 export const TYPE_ID = 5;
 export const V_MAX = 9999;
-export const TARGETS = [
-  'c_signed_overflow', 'c_usual_conversions', 'c_promotion', 'c_truncating_division', 'c_shift_negative',
-  'c_char_signedness', 'c_unsigned_wrap', 'c_narrowing', 'c_jump_signedness',
-];
 
 const FLAGS = ['CF', 'ZF', 'SF', 'OF'];
 const INT_MAX = 2147483647;
@@ -860,6 +856,9 @@ function takenOf(ctx, jmp) {
   return !!next && next.i !== jmp.i + 1;
 }
 
+// every tag some card diagnoses, so "Try one like it" is offered for each
+// (flags and shift tags too: variant() aims at any card listing the tag)
+export const TARGETS = [...new Set(DEFS.flatMap((d) => d.tags))];
 export const CARDS = DEFS.map((d) => ({ id: d.id, section: `CS:APP ${d.section}`, title: d.title, spec: d.spec, tags: d.tags.slice(), ask: d.kind }));
 
 // ---------------------------------------------------------------------------

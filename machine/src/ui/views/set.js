@@ -3,7 +3,7 @@
 // At the end a short result code carries the first-attempt scores (and, for
 // study sets, the randomly assigned group) back to the teacher by paste.
 import { h, href, announce, focus, replace } from '../../lib/dom.js';
-import { load, save } from '../../lib/store.js';
+import { load, save, remove } from '../../lib/store.js';
 import { mulberry32, newSeed } from '../../lib/rng.js';
 import { decodeSet, encodeToken, ARM_UNKNOWN } from '../../lib/codec.js';
 import { itemForSpec, makeItem, ITEM_TYPES } from '../../learn/items/index.js';
@@ -12,7 +12,7 @@ import { assignArm, recoverArm } from '../../learn/study.js';
 import * as sched from '../../learn/scheduler.js';
 import { button, callout, copyBox, tile } from '../parts.js';
 import { mountItem } from '../runner.js';
-import { loadSched, saveSched, reviewLink } from '../session.js';
+import { loadSched, saveSched, reviewLink, formatDay } from '../session.js';
 import { setNav } from '../nav.js';
 
 let runner = null;
@@ -20,6 +20,47 @@ let flush = null;
 let onHide = null;
 
 const validArm = (a) => a === 0 || a === 1;
+
+// ------------------------------------------------------------------ storage per set code
+// Progress and study arms are stored under the full set code (setprog.<code>,
+// arm.<code>): the 10-bit setId in result codes collides after a few dozen sets.
+// 'setindex' lists the codes opened on this device, newest first, so a delayed
+// set can find its study set's arm by setId and old progress can be pruned.
+const INDEX_KEY = 'setindex';
+const KEEP_SETS = 100;
+function loadIndex() {
+  const list = load(INDEX_KEY, []);
+  return Array.isArray(list) ? list.filter((e) => e && typeof e.code === 'string' && Number.isInteger(e.setId)) : [];
+}
+/** put this set first in the index and forget the progress of sets beyond the newest KEEP_SETS */
+function touchIndex(set) {
+  const list = [{ code: set.code, setId: set.setId, mode: set.mode, t: Date.now() }, ...loadIndex().filter((e) => e.code !== set.code)];
+  for (const e of list.slice(KEEP_SETS)) { remove(`setprog.${e.code}`); remove(`arm.${e.code}`); }
+  save(INDEX_KEY, list.slice(0, KEEP_SETS));
+}
+/** data an older build keyed by setId moves to the code's keys, but only when it is this set's */
+function migrateLegacy(set) {
+  const oldKey = `setprog.${set.setId}`;
+  const old = load(oldKey, null);
+  if (!old || typeof old !== 'object' || old.code !== set.code) return;
+  if (load(`setprog.${set.code}`, null) === null) save(`setprog.${set.code}`, old);
+  remove(oldKey);
+  if (set.mode === 'study') {
+    const arm = load(`arm.${set.setId}`, null);
+    if (validArm(arm) && !validArm(load(`arm.${set.code}`, null))) save(`arm.${set.code}`, arm);
+    if (validArm(arm)) remove(`arm.${set.setId}`);
+  }
+}
+/** the arm of the study set a delayed set links to (by setId), newest first; then an older build's key */
+function linkedArm(link) {
+  for (const e of loadIndex()) {
+    if (e.setId !== link || (e.mode && e.mode !== 'study')) continue;
+    const a = load(`arm.${e.code}`, null);
+    if (validArm(a)) return a;
+  }
+  const legacy = load(`arm.${link}`, null);
+  return validArm(legacy) ? legacy : null;
+}
 
 export function render(el, ctx) {
   setNav(null);
@@ -33,34 +74,79 @@ export function render(el, ctx) {
     return;
   }
   const { setId, mode, n, level } = set;
-  const progKey = `setprog.${setId}`;
-
-  // ---------------------------------------------------------------- the arm (study sets only; never shown)
-  let arm;
-  if (mode === 'study') {
-    arm = load(`arm.${setId}`, null);
-    if (!validArm(arm)) { arm = assignArm(newSeed()); save(`arm.${setId}`, arm); }
-  } else if (mode === 'delayed') {
-    const stored = set.link !== null ? load(`arm.${set.link}`, null) : null;
-    arm = validArm(stored) ? stored : ARM_UNKNOWN;
-  }
-  const plan = planSet(set, { arm: mode === 'study' ? arm : undefined });
+  const progKey = `setprog.${set.code}`;
+  const armKey = `arm.${set.code}`;
+  migrateLegacy(set);
+  touchIndex(set);
 
   // ---------------------------------------------------------------- progress (survives a reload)
   let prog = load(progKey, null);
-  if (!prog || prog.code !== set.code || !Array.isArray(prog.results)) prog = { code: set.code, results: [], token: null };
-  prog.results = plan.map((_, i) => {
-    const r = prog.results[i];
-    return r && typeof r.correct === 'boolean' ? { correct: r.correct, tag: typeof r.tag === 'string' ? r.tag : null } : null;
-  });
+  if (!prog || typeof prog !== 'object' || prog.code !== set.code || !Array.isArray(prog.results)) prog = { code: set.code, results: [], token: null };
+
+  // ---------------------------------------------------------------- the arm (study sets only; never shown)
+  let arm;
+  const pickArm = () => {
+    if (mode === 'study') {
+      arm = load(armKey, null);
+      if (!validArm(arm)) { arm = assignArm(newSeed()); save(armKey, arm); }
+    } else if (mode === 'delayed') {
+      // recovered from a pasted code for this set, else the linked study set's (not after "Start fresh")
+      const own = load(armKey, null);
+      const linked = !prog.fresh && set.link !== null ? linkedArm(set.link) : null;
+      arm = validArm(own) ? own : validArm(linked) ? linked : ARM_UNKNOWN;
+    }
+  };
+  pickArm();
+  let plan = planSet(set, { arm: mode === 'study' ? arm : undefined });
+  const normResults = () => {
+    prog.results = plan.map((_, i) => {
+      const r = prog.results[i];
+      return r && typeof r.correct === 'boolean' ? { correct: r.correct, tag: typeof r.tag === 'string' ? r.tag : null } : null;
+    });
+  };
+  normResults();
   const saveProg = () => save(progKey, prog);
   const firstOpen = () => { const k = prog.results.findIndex((r) => !r); return k < 0 ? plan.length : k; };
+  const answered = () => prog.results.filter(Boolean).length;
 
   const stage = h('div', { class: 'hs-stage stack' });
   const main = h('main', { class: 'page page-narrow stack hs', 'data-view': 'set' },
     h('h1', null, mode === 'normal' ? 'Homework set' : 'Practice set'),
     stage);
   el.append(main);
+
+  // ---------------------------------------------------------------- answers already on this device (shared Chromebooks)
+  function gate() {
+    const count = answered();
+    const finished = firstOpen() >= plan.length;
+    const day = Number.isInteger(finished ? prog.done : prog.at) ? formatDay(finished ? prog.done : prog.at) : null;
+    const when = finished ? `finished${day ? ` ${day}` : ''}` : `${count} of ${plan.length} answered${day ? `, last on ${day}` : ''}`;
+    const heading = h('h2', { id: 'hs-gate-h', tabindex: '-1' }, `This device already has answers for this set (${when}).`);
+    const mine = button(finished ? 'Show my code' : `Carry on from question ${firstOpen() + 1}`, { kind: 'primary', onClick: () => (finished ? finish() : ask(firstOpen())) });
+    const fresh = button("Start fresh (I'm someone else)", { onClick: startFresh });
+    replace(stage, h('section', { class: 'panel stack-sm hs-gate', 'aria-labelledby': 'hs-gate-h' },
+      heading,
+      h('p', null, finished ? 'If they are yours, show your result code.' : 'If they are yours, carry on where you left off.', ' If you are someone else, start fresh: the earlier answers are removed from this device.'),
+      h('div', { class: 'row' }, mine, fresh)));
+  }
+
+  function startFresh() {
+    commit();
+    remove(progKey);
+    prog = { code: set.code, results: [], token: null };
+    if (mode === 'study') { remove(armKey); pickArm(); plan = planSet(set, { arm }); }
+    if (mode === 'delayed') {
+      // the stored group was the previous learner's: this learner may paste their own code
+      remove(armKey);
+      prog.fresh = true;
+      pickArm();
+      saveProg();
+    }
+    normResults();
+    intro();
+    focus(stage.querySelector('.btn.primary'));
+    announce('Started fresh. The earlier answers are removed from this device.');
+  }
 
   // ---------------------------------------------------------------- intro
   function intro() {
@@ -84,8 +170,11 @@ export function render(el, ctx) {
       const r = recoverArm(input.value, set.link);
       if (validArm(r.arm)) {
         arm = r.arm;
-        save(`arm.${set.link}`, arm);
-        box.replaceChildren(callout('ok', null, "Thanks, that's all we need."));
+        save(armKey, arm);
+        const done = callout('ok', null, "Thanks, that's all we need.");
+        done.setAttribute('tabindex', '-1');
+        box.replaceChildren(done);
+        focus(done);
         announce('Code accepted.');
       } else {
         msg.replaceChildren(callout('bad', null, r.error || 'That code did not work. You can carry on without it.'));
@@ -111,7 +200,7 @@ export function render(el, ctx) {
       const state = sched.recordAttempt(loadSched(), {
         type: p.item.type, params: ITEM_TYPES[p.item.type].encodeParams(p.item.params),
         correct: p.correct, tag: (tagOverride !== undefined ? tagOverride : p.tag) || undefined,
-        group: p.group, today: sched.dayNumber(new Date()),
+        group: 'set', today: sched.dayNumber(new Date()),
       });
       saveSched(state);
     } catch (e) { console.error(e); }
@@ -144,6 +233,7 @@ export function render(el, ctx) {
       nextLabel: i === plan.length - 1 ? 'Finish' : 'Next question',
       onDone(r) {
         prog.results[i] = { correct: r.correct, tag: r.tag || null };
+        prog.at = sched.dayNumber(new Date());
         saveProg();
         pending = { item, correct: r.correct, tag: r.tag, group: slot.group };
         if (r.correct || slot.feedback === 'answerOnly') commit();
@@ -164,6 +254,7 @@ export function render(el, ctx) {
     const summary = summarizeSet(prog.results, plan, { setId, mode, arm });
     try { token = encodeToken(summary); } catch (e) { console.error(e); }
     prog.token = token;
+    if (!Number.isInteger(prog.done)) prog.done = sched.dayNumber(new Date());
     saveProg();
     const right = summary.g1.right + summary.g2.right;
     const total = summary.g1.total + summary.g2.total;
@@ -186,8 +277,8 @@ export function render(el, ctx) {
     announce(`Set complete. ${right} of ${total} right first time. Your result code is on the screen.`);
   }
 
-  // every question answered (even if the page closed before the code was shown): straight to the code
-  if (firstOpen() >= plan.length) finish();
+  // answers already here (a reload, or someone else on a shared device): ask before showing anything
+  if (answered() > 0) gate();
   else intro();
 }
 

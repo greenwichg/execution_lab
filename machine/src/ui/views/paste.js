@@ -2,7 +2,7 @@
 // the lab's compiler + x86-64 emulator. A wrong prediction runs the bisection
 // checkpoints (≤ 3) to find the first write where the learner's model and the
 // machine part ways, then the diagnosis and the Why rail for that statement.
-import { h, announce, focus, shareUrl } from '../../lib/dom.js';
+import { h, announce, focus, shareUrl, replace } from '../../lib/dom.js';
 import { load, save } from '../../lib/store.js';
 import { LIMITS, compile } from '../../engine/minic.js';
 import { hashStr } from '../../lib/rng.js';
@@ -16,6 +16,8 @@ import { setNav } from '../nav.js';
 
 export const SHARE_MAX = 4000;          // characters of base64url in a share link
 const CODE_KEY = 'paste.code';
+const LINKED_KEY = 'paste.linked';       // a program opened from a share link, until the learner makes it theirs
+const PREV_KEY = 'paste.code.prev';      // the learner's program before they kept a linked one
 
 export const EXAMPLES = [
   { title: 'Unsigned 2 minus 15', code: 'int a = 5;\nint b = a * 3;\nunsigned u = 2;\nu = u - b;\nprintf("%u\\n", u);' },
@@ -70,16 +72,25 @@ export function render(el, ctx) {
   const saved0 = load(CODE_KEY, null);
   const saved = typeof saved0 === 'string' && saved0.length <= 20000 ? saved0 : null;
   let restore = null;
+  let keep = null;
+  // while the editor shows a program from a link, it is saved under LINKED_KEY: the
+  // learner's own program (CODE_KEY) changes only when they edit it or keep it
+  let linked = false;
   if (fromLink !== null) {
     code = decodeCode(fromLink, ctx.query.get('k'));
     if (code === null) {
       notice = callout('bad', "That share link didn't work.", 'It may have been cut short or changed when it was copied. Ask for the link again. Your own code is below.');
+    } else if (saved !== null && saved === code) {
+      notice = callout(null, null, 'Loaded the program from your link. It is the same as your saved program.');
     } else {
-      notice = callout(null, null, 'Loaded the program from your link. It stays on this device.');
-      if (saved !== null && saved !== code) {
-        restore = button('Load my own program instead', { small: true });
-        notice.append(h('p', { class: 'callout-body' }, restore));
-      }
+      linked = true;
+      save(LINKED_KEY, code);
+      notice = callout(null, null, saved !== null
+        ? 'Loaded the program from your link. Your own saved program is kept until you edit this one or choose Keep this program.'
+        : 'Loaded the program from your link. It is saved as yours once you edit it or choose Keep this program.');
+      keep = button('Keep this program', { small: true });
+      if (saved !== null) restore = button('Load my own program instead', { small: true, kind: 'ghost' });
+      notice.append(h('p', { class: 'callout-body row' }, keep, restore));
     }
   }
   if (code === null) code = saved ?? EXAMPLES[0].code;
@@ -163,12 +174,24 @@ export function render(el, ctx) {
     count.textContent = parts.join(' ');
     count.classList.toggle('over', used > LIMITS.lines || long.length > 0);
   }
+  /** save the editor: to the learner's own program, or (while a linked one is shown) beside it */
+  function persist() { save(linked ? LINKED_KEY : CODE_KEY, ta.value); }
+  /** the program on screen becomes the learner's own; the one it replaces is kept under PREV_KEY */
+  function adopt() {
+    if (!linked) return;
+    linked = false;
+    const prev = load(CODE_KEY, null);
+    if (typeof prev === 'string' && prev !== ta.value) save(PREV_KEY, prev);
+    save(CODE_KEY, ta.value);
+    keep?.closest('.callout-body')?.remove();
+  }
   ta.addEventListener('input', () => {
     errLine = null;
     examples.value = '';
     if (undoRow.firstChild) { undoRow.replaceChildren(); before = null; }
     drawGutter();
-    save(CODE_KEY, ta.value);
+    adopt();
+    persist();
   });
   ta.addEventListener('scroll', () => { gutter.scrollTop = ta.scrollTop; });
   ta.addEventListener('keydown', (e) => {
@@ -197,7 +220,7 @@ export function render(el, ctx) {
     ta.value = ex.code;
     errLine = null;
     drawGutter();
-    save(CODE_KEY, ta.value);
+    persist();
     result.replaceChildren();
     shareHolder.replaceChildren();
     undoRow.replaceChildren(`Loaded the example “${ex.title}”.`,
@@ -211,18 +234,26 @@ export function render(el, ctx) {
     examples.value = '';
     errLine = null;
     drawGutter();
-    save(CODE_KEY, ta.value);
+    persist();
     undoRow.replaceChildren('Your own code is back.');
     ta.focus();
   }
   restore?.addEventListener('click', () => {
     if (ta.readOnly) return;
     ta.value = saved;
+    linked = false;
     errLine = null;
     drawGutter();
     restore.closest('.callout')?.remove();
     announce('Loaded your own program.');
     ta.focus();
+  });
+  keep?.addEventListener('click', () => {
+    adopt();
+    const done = h('p', { class: 'callout-body', tabindex: '-1' }, 'Kept: this is now your saved program.');
+    notice.append(done);
+    focus(done);
+    announce('Kept. This is now your saved program.');
   });
   drawGutter();
 
@@ -248,7 +279,7 @@ export function render(el, ctx) {
   function runIt() {
     if (locked) return;
     const src = ta.value;
-    save(CODE_KEY, src);
+    persist();
     if (!conf) {
       hint.textContent = 'First choose how sure you are — it helps you see what you really know.';
       confBox.el.querySelector('button')?.focus();
@@ -294,7 +325,7 @@ export function render(el, ctx) {
     if (line) {
       actions.append(button(`Go to line ${line}`, { small: true, onClick: () => goTo(line, col || 1) }));
     }
-    result.replaceChildren(box, line ? h('div', { class: 'pe-error-src' }, highlightC(ta.value, { errorLine: line, focusLine: line, label: 'Your program, with the problem line marked' })) : null, actions);
+    replace(result, box, line ? h('div', { class: 'pe-error-src' }, highlightC(ta.value, { errorLine: line, focusLine: line, label: 'Your program, with the problem line marked' })) : null, actions);
     announce(`${head} ${msg}`);
     box.setAttribute('tabindex', '-1');
     focus(box);

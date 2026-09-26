@@ -67,16 +67,32 @@
 .sr-layer, .sr-why { max-width: 1100px; }
 .sr-layer .why-layer { margin-left: 0; padding-left: 0; border-left: 0; list-style: none; }
 .sr-layer .why-layer::before { display: none; }
-.sr .sh-bits .c { width: calc(var(--cell) * .62); height: calc(var(--cell) * .66); font-size: calc(var(--cell) * .42); }
+.sr .sh-bits .c { width: max(3.6rem, calc(var(--cell) * .8)); height: max(3.8rem, calc(var(--cell) * .86)); font-size: max(3rem, calc(var(--cell) * .7)); }
 .sr .sh-label { width: 5em; font-size: 1rem; }
 .sr .sh-arrow { margin-left: calc(5em + 10px); font-size: 1rem; }
 .sr .twos-vis .sh-label.wide { width: 9em; }
-.sr .eq { font-size: calc(var(--cell) * .42); }
-.sr .eq-box { min-width: calc(var(--cell) * .7); height: calc(var(--cell) * .7); }
+.sr .eq { font-size: max(3rem, calc(var(--cell) * .7)); }
+.sr .eq-box { min-width: max(4rem, calc(var(--cell) * .95)); height: max(4rem, calc(var(--cell) * .95)); }
 /* read from the back of the room: explanation text at ≥ 22 px */
 .sr-why .why-say, .sr-layer .why-say { font-size: 1.4rem; max-width: 60ch; }
 .sr .why-title { font-size: 1rem; }
 .sr .cols-note, .sr .eq-legend { font-size: 1.15rem; }
+/* the Why rail and first layer on the projector (and the board's worked example):
+   every digit the class reads is ≥ 48 px (3rem), whatever the screen size */
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid {
+  --cell: 3.9rem;
+  grid-template-columns: 4.6rem repeat(var(--cols), var(--cell)) minmax(5rem, auto);
+  font-size: 3rem;
+}
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c { height: 3.9rem; }
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c.carry,
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c.idx { height: 3.4rem; font-size: 3rem; }
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c.idx { font-weight: 600; }
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c-label { font-size: 1.2rem; }
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c-right { font-size: 3rem; padding-left: 16px; }
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .flag-head { font-size: 3rem; }
+body.projector :is(.sr-why, .sr-layer, .wx-layer) .flags-vis { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+:is(.sr, .wx) .eq-bin sub { font-size: .5em; }
 .sr-end h2 { font-size: 2rem; }
 .sr-summary { margin: 0; padding-left: 1.6rem; font-size: 1.15rem; }
 .sr-summary li { padding: 6px 0; border-bottom: 1px solid var(--line); }
@@ -113,6 +129,9 @@
 .rv-res-extra.rv-lost { color: var(--bad); text-decoration: line-through; text-decoration-thickness: calc(var(--cell) * .07); border-top-color: var(--ink); }
 .rv-right { justify-self: start; padding-left: calc(var(--cell) * .3); font: 600 calc(var(--cell) * .34)/1 var(--sans); color: var(--muted); white-space: nowrap; }
 @keyframes rv-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+/* on the projector the carries and the denary values are read from the back: ≥ 48 px */
+.sr .rv-carry { height: max(3.2rem, calc(var(--cell) * .74)); font-size: max(3rem, calc(var(--cell) * .7)); }
+.sr .rv-right { font-size: max(3rem, calc(var(--cell) * .6)); }
 .rv-note:empty { display: none; }
 .rv-note { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 1.2rem; }
 .sr .rv-note { font-size: 1.5rem; }
@@ -183,10 +202,10 @@ body.wx-open { overflow: hidden; }
 .wx-body > * + * { margin-top: 6px; }
 .wx-sub { font-weight: 700; font-size: 1.5rem; }
 .wx-layer { overflow-x: auto; }
-.wx .eq { font-size: 1.8rem; }
-.wx .eq-box { min-width: 3rem; height: 3rem; }
+.wx .eq { font-size: 3rem; }
+.wx .eq-box { min-width: 4rem; height: 4rem; }
 .wx .eq-legend, .wx .cols-note { font-size: 1rem; }
-.wx .sh-bits .c { width: 2.6rem; height: 2.8rem; font-size: 1.5rem; }
+.wx .sh-bits .c { width: 3.6rem; height: 3.8rem; font-size: 3rem; }
 .wx .sh-label { width: 5em; font-size: 1rem; }
 .wx .sh-arrow { margin-left: calc(5em + 10px); font-size: 1rem; }
 .wx .why-say { font-size: 1.3rem; }
@@ -213,4 +232,16 @@ body.wx-open { overflow: hidden; }
   .wx-fix, .wx .why-say { font-size: 1.05rem; }
   .hs-recover .row { flex-wrap: wrap; }
   .rv-key dt { min-width: 0; }
+  /* a phone is not a projector: keep the starter and overlay inside the screen */
+  .sr .sh-bits .c, .wx .sh-bits .c { width: 1.9rem; height: 2rem; font-size: 1.05rem; }
+  .sr .eq, .wx .eq { font-size: 1.3rem; }
+  .sr .eq-box, .wx .eq-box { min-width: 2.1rem; height: 2.1rem; }
+  body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid { --cell: 1.55rem; grid-template-columns: 2em repeat(var(--cols), var(--cell)) minmax(2.4em, auto); font-size: 1rem; }
+  body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c { height: 2rem; }
+  body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c.carry, body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c.idx { height: 1.3rem; font-size: .8rem; }
+  body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c-label, body.projector :is(.sr-why, .sr-layer, .wx-layer) .cols-grid .c-right { font-size: .8rem; padding-left: 6px; }
+  body.projector :is(.sr-why, .sr-layer, .wx-layer) .flag-head { font-size: 1.2rem; }
+  .sr .rv-carry { height: calc(var(--cell) * .62); font-size: calc(var(--cell) * .5); }
+  .sr .rv-right { font-size: calc(var(--cell) * .4); }
 }
+.bd-unclassified { font-weight: 650; }
