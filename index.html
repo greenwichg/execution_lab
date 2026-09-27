@@ -16,15 +16,16 @@
    pointer-light DOM layer on top of it.
    ===================================================================== */
 :root{
-  --bg:#020308;
-  --fg:#e4eef8;
-  --fg-dim:rgba(205,224,242,.66);
-  --fg-faint:rgba(170,200,228,.38);
-  --line:rgba(150,200,240,.14);
-  --line-strong:rgba(160,215,250,.30);
-  --accent:#74e4ff;
-  --accent-2:#a898ff;
-  --glass:rgba(8,14,26,.46);
+  --bg:#08090b;
+  --fg:#eceee9;
+  --fg-dim:rgba(226,230,222,.68);
+  --fg-faint:rgba(204,210,200,.42);
+  --line:rgba(222,228,218,.13);
+  --line-strong:rgba(228,234,224,.30);
+  --accent:#b4f07a;
+  --accent-2:#8fa39a;
+  --hl:#9dff4f;
+  --glass:rgba(13,14,16,.62);
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   --pad:clamp(14px,2.1vw,34px);
@@ -43,7 +44,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #hud.on{opacity:1}
 #hud .tl{position:absolute;left:var(--pad);top:var(--pad)}
 .brand{display:flex;align-items:center;gap:10px;font:600 11.5px/1 var(--sans);letter-spacing:.34em;color:var(--fg)}
-.brand i{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent),0 0 22px rgba(116,228,255,.5)}
+.brand i{width:7px;height:7px;border-radius:50%;background:var(--hl);box-shadow:0 0 8px rgba(157,255,79,.55)}
 .brand-sub{margin-top:9px;padding-left:17px;font:400 10px/1.3 var(--mono);letter-spacing:.1em;color:var(--fg-faint)}
 #hud .tr{position:absolute;right:var(--pad);top:var(--pad);text-align:right;display:flex;flex-direction:column;align-items:flex-end}
 .stage-no{font:500 10.5px/1 var(--mono);letter-spacing:.24em;color:var(--fg-faint)}
@@ -61,16 +62,43 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   font:500 9.5px/1 var(--mono);letter-spacing:.16em;color:var(--fg-dim);background:rgba(8,14,26,.3);transition:border-color .2s,color .2s}
 #infoBtn:hover,#infoBtn[aria-pressed="true"]{border-color:var(--line-strong);color:var(--fg)}
 
-.caption{position:absolute;left:var(--pad);bottom:calc(var(--ctrl-h) + 92px);max-width:min(390px,40vw);transition:opacity .45s ease,transform .45s ease}
+.caption{position:absolute;left:var(--pad);bottom:calc(var(--ctrl-h) + 86px);max-width:min(520px,44vw);transition:opacity .45s ease,transform .45s ease}
 .caption.swap{opacity:0;transform:translateY(6px)}
-.cap-head{font:500 10.5px/1.45 var(--mono);letter-spacing:.16em;color:var(--accent)}
-.cap-body{margin-top:9px;font:400 13.5px/1.6 var(--sans);color:var(--fg-dim)}
+.caption::before{content:'';display:block;width:22px;height:2px;margin-bottom:13px;background:var(--hl)}
+.cap-head{font:300 clamp(17px,2.05vw,29px)/1.12 var(--sans);letter-spacing:.07em;color:#f3f5f0;text-transform:uppercase;text-shadow:0 1px 14px rgba(0,0,0,.55)}
+.cap-body{margin-top:10px;max-width:46ch;font:400 12.5px/1.55 var(--sans);color:var(--fg-dim);text-shadow:0 1px 10px rgba(0,0,0,.6)}
+/* ---------- callouts: small labels pinned to 3D points (projected every frame) ---------- */
+#callouts{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.co{position:absolute;left:0;top:0;opacity:0;will-change:transform,opacity;--lead:34px}
+.co .box{position:absolute;left:0;bottom:var(--lead);transform:translateX(-50%);padding:5px 9px 6px;border:1px solid rgba(226,232,222,.24);border-radius:2px;
+  background:rgba(13,14,16,.8);font:500 11px/1.25 var(--sans);letter-spacing:.01em;color:#f1f3ee;text-align:center;white-space:nowrap}
+.co .box small{display:block;margin-top:2px;font:400 10px/1.2 var(--sans);color:rgba(222,228,218,.62)}
+.co .box small:empty{display:none}
+.co .ld{position:absolute;left:0;bottom:3px;width:1px;height:calc(var(--lead) - 3px);background:linear-gradient(to top,var(--hl),rgba(157,255,79,.25))}
+.co .dt{position:absolute;left:-3px;bottom:-3px;width:6px;height:6px;border-radius:50%;background:var(--hl);box-shadow:0 0 7px rgba(157,255,79,.75)}
+.co.down .box{bottom:auto;top:var(--lead)}
+.co.down .ld{bottom:auto;top:3px;background:linear-gradient(to bottom,var(--hl),rgba(157,255,79,.25))}
+.co.left .box{left:auto;right:var(--lead);bottom:0;transform:translateY(50%)}
+.co.left .ld{left:auto;right:3px;bottom:0;width:calc(var(--lead) - 3px);height:1px;background:linear-gradient(to left,var(--hl),rgba(157,255,79,.25))}
+.co.right .box{left:var(--lead);bottom:0;transform:translateY(50%)}
+.co.right .ld{left:3px;bottom:0;width:calc(var(--lead) - 3px);height:1px;background:linear-gradient(to right,var(--hl),rgba(157,255,79,.25))}
+.co.right .dt,.co.left .dt{bottom:-3px}
+/* ---------- FIELD OF VIEW ruler (log scale, 10 m → 0.1 nm) ---------- */
+#fov{position:absolute;right:var(--pad);top:56%;height:min(40vh,380px);width:150px;transform:translateY(-50%);opacity:0;transition:opacity .6s ease}
+#fov.on{opacity:1}
+#fov .fov-h{position:absolute;right:0;top:-24px;font:500 9px/1 var(--mono);letter-spacing:.22em;color:var(--fg-faint);white-space:nowrap}
+#fov .tk{position:absolute;right:0;display:flex;align-items:center;gap:6px;transform:translateY(-50%);font:400 9.5px/1 var(--mono);color:var(--fg-faint);white-space:nowrap}
+#fov .tk::after{content:'';width:7px;height:1px;background:var(--line-strong)}
+#fov .mk{position:absolute;right:0;display:flex;align-items:center;gap:8px;transform:translateY(-50%)}
+#fov .mk span{font:500 11px/1 var(--mono);letter-spacing:.02em;color:var(--fg);white-space:nowrap;text-shadow:0 1px 8px rgba(0,0,0,.7)}
+#fov .mk i{display:block;width:78px;height:1px;background:linear-gradient(to right,rgba(157,255,79,.2),var(--hl));box-shadow:0 0 6px rgba(157,255,79,.6)}
+#scale{display:none!important}
 .bl{position:absolute;left:var(--pad);bottom:calc(var(--ctrl-h) + 18px)}
 .br{position:absolute;right:var(--pad);bottom:calc(var(--ctrl-h) + 18px);text-align:right}
 .k{font:500 9.5px/1 var(--mono);letter-spacing:.26em;color:var(--fg-faint)}
 .v{margin-top:9px;font:500 16px/1.2 var(--mono);color:var(--fg);letter-spacing:.02em;white-space:nowrap}
 .br .v{font-size:19px;letter-spacing:.06em}
-.br .v em{font-style:normal;color:var(--accent);text-shadow:0 0 14px rgba(116,228,255,.55)}
+.br .v em{font-style:normal;color:var(--accent)}
 .s{margin-top:7px;font:400 11px/1.2 var(--mono);color:var(--fg-faint);letter-spacing:.06em;white-space:nowrap}
 
 /* ---------- side panels (language paths / reality check) ---------- */
@@ -95,7 +123,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .rvars{display:grid;grid-template-columns:1fr;gap:0}
 .rv{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-top:1px solid var(--line);font:400 12px/1.3 var(--mono);color:var(--fg-dim);transition:color .25s,background .25s}
 .rv b{font-weight:500;color:var(--fg)}
-.rv.ch{color:var(--accent);background:linear-gradient(90deg,rgba(116,228,255,.10),transparent)}
+.rv.ch{color:var(--accent);background:linear-gradient(90deg,rgba(157,255,79,.08),transparent)}
 .rv.ch b{color:var(--accent)}
 .rout{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 .rout .k{margin-bottom:6px}
@@ -110,22 +138,22 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* ---------- cinematic title cards ---------- */
 #titles{position:fixed;inset:0;z-index:12;pointer-events:none}
 .card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;opacity:0;width:min(92vw,900px);will-change:opacity,transform}
-.card::before{content:'';position:absolute;inset:-35% -12%;background:radial-gradient(closest-side,rgba(2,3,8,.62),rgba(2,3,8,.3) 55%,rgba(2,3,8,0));z-index:-1;pointer-events:none}
+.card::before{content:'';position:absolute;inset:-35% -12%;background:radial-gradient(closest-side,rgba(8,9,11,.62),rgba(8,9,11,.3) 55%,rgba(8,9,11,0));z-index:-1;pointer-events:none}
 .kicker{font:500 10.5px/1 var(--mono);letter-spacing:.42em;color:var(--fg-faint)}
 .card h1{margin-top:22px;font:300 clamp(20px,3.5vw,54px)/1.05 var(--sans);letter-spacing:.36em;margin-right:-.36em;color:var(--fg);white-space:nowrap;
-  text-shadow:0 0 30px rgba(116,228,255,.25)}
+  text-shadow:0 2px 24px rgba(0,0,0,.6)}
 .card .rule{margin:24px auto 0;width:120px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent)}
 .q{font:300 clamp(20px,2.9vw,38px)/1.45 var(--sans);letter-spacing:.02em;color:var(--fg)}
 .q em{font-style:normal;color:var(--accent)}
 .flip{font:300 clamp(54px,9vw,128px)/1 var(--mono);color:#fff;letter-spacing:.05em;display:flex;gap:.35em;justify-content:center;align-items:center;
-  text-shadow:0 0 40px rgba(116,228,255,.65)}
+  text-shadow:0 2px 30px rgba(0,0,0,.65)}
 .flip i{font-style:normal;font-size:.5em;color:var(--accent)}
 .flip-sub{margin-top:26px;font:500 clamp(15px,1.8vw,22px)/1 var(--mono);letter-spacing:.3em;color:var(--fg-dim)}
 .hier{position:absolute;left:calc(var(--pad) + 2vw);top:50%;transform:translateY(-50%);text-align:left;opacity:0;width:auto}
 .hier .t{font:500 10px/1 var(--mono);letter-spacing:.3em;color:var(--fg-faint);margin-bottom:16px}
 .hier .it{font:500 clamp(11px,1.15vw,14px)/1 var(--mono);letter-spacing:.24em;color:var(--fg);opacity:.18;transition:opacity .35s,color .35s;padding:5px 0}
 .hier .it.on{opacity:1}
-.hier .it.cur{color:var(--accent);text-shadow:0 0 16px rgba(116,228,255,.6)}
+.hier .it.cur{color:var(--accent)}
 .hier .ar{font:300 11px/1 var(--mono);color:var(--fg-faint);opacity:.35;padding:1px 0 1px 3px}
 #t-stack{left:31%;width:min(56vw,640px)}
 .stack{display:flex;flex-direction:column;align-items:center;gap:2px}
@@ -139,7 +167,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .stmt em{font-style:normal;color:var(--accent)}
 .wrote{display:inline-block;text-align:left}
 .wrote .l{font:400 clamp(12px,1.2vw,15px)/1 var(--mono);letter-spacing:.28em;color:var(--fg-faint)}
-.wrote .c{margin:16px 0 40px 2.2em;font:500 clamp(24px,3.4vw,46px)/1 var(--mono);color:var(--accent);text-shadow:0 0 26px rgba(116,228,255,.45)}
+.wrote .c{margin:16px 0 40px 2.2em;font:500 clamp(24px,3.4vw,46px)/1 var(--mono);color:var(--accent);text-shadow:none}
 .wrote .m{margin:16px 0 0 2.2em;font:300 clamp(18px,2.4vw,32px)/1.35 var(--sans);color:var(--fg)}
 .wrote .p2{opacity:0;transition:opacity 1s}
 .wrote .p2.on{opacity:1}
@@ -159,7 +187,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #timeline{position:relative;flex:1;height:28px;cursor:pointer;touch-action:none;margin:0 6px}
 #timeline .track{position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;background:var(--line);border-radius:2px;transition:height .15s,margin .15s}
 #timeline:hover .track,#timeline.drag .track{height:4px;margin-top:-2px}
-#timeline .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(116,228,255,.35),var(--accent));border-radius:2px;box-shadow:0 0 10px rgba(116,228,255,.4)}
+#timeline .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(180,240,122,.35),var(--accent));border-radius:2px;box-shadow:0 0 10px rgba(180,240,122,.4)}
 #timeline .tick{position:absolute;top:50%;width:1px;height:8px;margin-top:-4px;background:var(--line-strong)}
 #timeline .head{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:#fff;box-shadow:0 0 12px var(--accent)}
 .time{min-width:92px;text-align:right;font:400 10px/1 var(--mono);letter-spacing:.1em;color:var(--fg-faint)}
@@ -231,17 +259,17 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 }
 /* ---------- sound: begin gate, speaker menu, subtitles, toast ---------- */
 #gate{position:fixed;inset:0;z-index:45;display:flex;align-items:center;justify-content:center;padding:24px;
-  background:radial-gradient(ellipse at 50% 46%,rgba(24,52,90,.30),rgba(2,3,8,0) 62%),var(--bg);transition:opacity .9s ease}
+  background:radial-gradient(ellipse at 50% 46%,rgba(62,64,60,.30),rgba(8,9,11,0) 62%),var(--bg);transition:opacity .9s ease}
 #gate .g-in{animation:gateIn 1.1s ease both}
 @keyframes gateIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 #gate[hidden]{display:none}
 #gate.out{opacity:0;pointer-events:none}
 .g-in{display:flex;flex-direction:column;align-items:center;text-align:center}
-.g-in h1{font:300 clamp(20px,3.5vw,54px)/1.05 var(--sans);letter-spacing:.36em;margin-right:-.36em;color:var(--fg);white-space:nowrap;text-shadow:0 0 30px rgba(116,228,255,.25)}
+.g-in h1{font:300 clamp(20px,3.5vw,54px)/1.05 var(--sans);letter-spacing:.36em;margin-right:-.36em;color:var(--fg);white-space:nowrap;text-shadow:0 2px 24px rgba(0,0,0,.6)}
 .g-in .rule{margin:24px auto 0;width:120px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent)}
-.g-begin{margin-top:46px;height:48px;padding:0 28px;border:1px solid rgba(116,228,255,.55);border-radius:999px;font:500 12px/1 var(--mono);letter-spacing:.26em;
-  color:var(--fg);background:rgba(116,228,255,.07);box-shadow:0 0 26px rgba(116,228,255,.16);transition:background .2s,box-shadow .2s,border-color .2s}
-.g-begin:hover,.g-begin:focus-visible{background:rgba(116,228,255,.15);box-shadow:0 0 36px rgba(116,228,255,.3);border-color:var(--accent);outline:none}
+.g-begin{margin-top:46px;height:48px;padding:0 28px;border:1px solid rgba(180,240,122,.55);border-radius:999px;font:500 12px/1 var(--mono);letter-spacing:.26em;
+  color:var(--fg);background:rgba(180,240,122,.07);box-shadow:0 0 26px rgba(180,240,122,.16);transition:background .2s,box-shadow .2s,border-color .2s}
+.g-begin:hover,.g-begin:focus-visible{background:rgba(180,240,122,.15);box-shadow:0 0 36px rgba(180,240,122,.3);border-color:var(--accent);outline:none}
 .g-silent{margin-top:14px;padding:9px 14px;font:400 12.5px/1 var(--sans);letter-spacing:.04em;color:var(--fg-dim);text-decoration:underline;
   text-underline-offset:4px;text-decoration-color:var(--line-strong);transition:color .2s}
 .g-silent:hover,.g-silent:focus-visible{color:var(--fg);outline:none;text-decoration-color:var(--accent)}
@@ -268,7 +296,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .mx-btns button{flex:1;height:28px;border:1px solid var(--line);border-radius:999px;font:500 10px/1 var(--mono);letter-spacing:.12em;color:var(--fg-dim);transition:border-color .2s,color .2s}
 .mx-btns button:hover,.mx-btns button:focus-visible{border-color:var(--line-strong);color:var(--fg);outline:none}
 .mx-btns button[hidden]{display:none}
-#soundOnBtn{border-color:rgba(116,228,255,.45);color:var(--fg)}
+#soundOnBtn{border-color:rgba(180,240,122,.45);color:var(--fg)}
 kbd{margin-left:4px;padding:1px 4px;border:1px solid var(--line);border-radius:3px;font:400 9px/1 var(--mono);color:var(--fg-faint)}
 .mx-voice{margin-top:14px;padding-top:10px;border-top:1px solid var(--line);font:400 8.5px/1.5 var(--mono);letter-spacing:.22em;color:rgba(255,196,130,.62)}
 #subs{position:fixed;left:50%;bottom:calc(var(--ctrl-h) + 58px);z-index:14;width:min(780px,56vw);transform:translate(-50%,4px);text-align:center;
@@ -315,8 +343,8 @@ kbd{margin-left:4px;padding:1px 4px;border:1px solid var(--line);border-radius:3
 .ed-hl,#edText{position:absolute;inset:0;margin:0;padding:10px 12px;font:400 13px/1.55 var(--mono);white-space:pre;tab-size:2;letter-spacing:0;overflow:auto}
 .ed-hl{color:var(--fg);pointer-events:none}
 #edText{resize:none;border:0;outline:none;background:transparent;color:transparent;caret-color:var(--accent);-webkit-text-fill-color:transparent}
-#edText::selection{background:rgba(116,228,255,.25);-webkit-text-fill-color:transparent}
-.ed-code:focus-within{border-color:rgba(116,228,255,.45)}
+#edText::selection{background:rgba(180,240,122,.25);-webkit-text-fill-color:transparent}
+.ed-code:focus-within{border-color:rgba(180,240,122,.45)}
 .hk{color:#b3a2ff}.hn{color:#6fe8ff}.hs{color:#ffcf9a}.ho{color:#8fc4ee}.hp{color:#5f7f9f}.hc{color:#5d7896;font-style:italic}.hpp{color:#8f86ff}
 .herr{background:rgba(255,90,110,.18);box-shadow:inset 2px 0 0 #ff6b81}
 .ed-status{min-height:16px;font:400 12px/1.45 var(--sans);color:var(--fg-dim)}
@@ -398,6 +426,8 @@ kbd{margin-left:4px;padding:1px 4px;border:1px solid var(--line);border-radius:3
 
 <!-- Minimal HUD -->
 <div id="hud">
+  <div id="callouts" aria-hidden="true"></div>
+  <div id="fov" aria-hidden="true"><div class="fov-h">FIELD OF VIEW</div><div class="mk"><span id="fovTxt">—</span><i></i></div></div>
   <header class="tl">
     <div class="brand"><i></i>CODE EXECUTION LAB</div>
     <div class="brand-sub">SIMPLIFIED NATIVE-CODE PATH · C → x86-64</div>
@@ -740,7 +770,11 @@ const QUALITY = (() => {
   const coarse = matchMedia('(pointer: coarse)').matches;
   let tier = coarse || minDim < 560 ? 0 : (navigator.hardwareConcurrency || 8) <= 4 ? 1 : 2;
   if (PARAMS.has('q')) tier = clamp(Math.round(+PARAMS.get('q')), 0, 2);
-  return { tier, msaa: [0, 2, 4][tier], maxPixels: [1.0e6, 2.0e6, 3.7e6][tier], density: [0.45, 0.75, 1][tier], bloomLevels: [4, 5, 6][tier] };
+  return {
+    tier, msaa: [0, 2, 4][tier], maxPixels: [1.0e6, 2.0e6, 3.7e6][tier], density: [0.45, 0.75, 1][tier], bloomLevels: [4, 5, 6][tier],
+    // screen-space ambient occlusion and the key light's shadow map (the look of dense hardware geometry)
+    ao: tier >= 1 && !PARAMS.has('noao'), shadowMap: PARAMS.has('noshadow') ? 0 : [0, 1024, 2048][tier],
+  };
 })();
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -752,6 +786,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: fals
 renderer.autoClear = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NoToneMapping;
+renderer.shadowMap.enabled = QUALITY.shadowMap > 0;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const MAX_ANISO = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
 const scene = new THREE.Scene();
@@ -763,7 +799,7 @@ const G = {
   uTime: { value: 0 },                    // wall clock (ambient motion)
   uT: { value: 0 },                       // story clock
   uFogD: { value: 0.01 },                 // fog density in render-frame units
-  uFogC: { value: new THREE.Color(0x020308) },
+  uFogC: { value: new THREE.Color(0x08090b) },
   uPx: { value: 800 },                    // pixels per unit at depth 1 (for point sprites)
 };
 const ONE_U = { value: 1 };
@@ -1183,6 +1219,226 @@ function canvasTexRaw(w, h, draw, o = {}) {
 }
 
 // =====================================================================
+// 4b · HARDWARE LOOK — the engineering-visualization style every scene
+//      shares: matte physically based materials under a warm studio key,
+//      procedural surface textures, one green highlight, callout labels
+// =====================================================================
+/** Palette: matte greys, copper/gold accents, and a single green highlight for "what is happening now". */
+const HW = {
+  bg: 0x0d0e10, floor: 0x151619, charcoal: 0x1c1d20, graphite: 0x2b2d31, steel: 0x6c7077, silver: 0xa7abb1, pale: 0xc8cbce,
+  copper: 0x93563a, copperDark: 0x5f3524, gold: 0xc6a15b, brass: 0xa8874d, blueSteel: 0x5d6b7c,
+  olive: 0x46533d, oliveDark: 0x2e372a, substrate: 0x1e2621, silicon: 0x50555d, oxide: 0x8d949c,
+  stripe: 0xc3d48a, hl: 0x9dff4f, hlDim: 0x5f8f3a,
+};
+
+/** Procedural surface textures (memoised; repeatable). Clone through hwMat({ map, repeat }) to tile them. */
+const TEX = {
+  /** dense SRAM / tensor array: a fine grid of rounded bit cells with word-line gaps */
+  sram: () => canvasTex(256, 256, (c, w, h) => {
+    const rnd = mulberry32(7), n = 16, s = w / n;
+    c.fillStyle = '#262c23'; c.fillRect(0, 0, w, h);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const v = 0.82 + rnd() * 0.3;
+      c.fillStyle = `rgb(${Math.round(98 * v)},${Math.round(114 * v)},${Math.round(84 * v)})`;
+      c.beginPath(); c.roundRect(x * s + s * 0.16, y * s + s * 0.16, s * 0.68, s * 0.68, s * 0.22); c.fill();
+      c.fillStyle = `rgba(255,255,240,${(0.08 + rnd() * 0.06).toFixed(3)})`; c.fillRect(x * s + s * 0.24, y * s + s * 0.2, s * 0.4, s * 0.12);
+    }
+    c.fillStyle = 'rgba(0,0,0,.45)'; for (let y = 0; y <= n; y += 4) c.fillRect(0, y * s - 1, w, 2);
+  }, { repeat: true }),
+  /** standard-cell logic: rows of cells of random width between lighter power rails */
+  logic: () => canvasTex(512, 512, (c, w, h) => {
+    const rnd = mulberry32(11), rowH = 16;
+    c.fillStyle = '#1b1c1f'; c.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y += rowH) {
+      let x = 0;
+      while (x < w) { const cw = 4 + Math.floor(rnd() * 30); const v = 58 + Math.floor(rnd() * 58); c.fillStyle = `rgb(${v},${v + 2},${v + 5})`; c.fillRect(x + 0.5, y + 2, cw - 1, rowH - 4); x += cw; }
+      c.fillStyle = 'rgba(210,214,220,.28)'; c.fillRect(0, y, w, 1.2);
+    }
+  }, { repeat: true }),
+  /** a metal routing layer: parallel tracks with breaks and vias */
+  metal: () => canvasTex(256, 256, (c, w, h) => {
+    const rnd = mulberry32(5);
+    c.fillStyle = '#16171a'; c.fillRect(0, 0, w, h);
+    for (let y = 2; y < h; y += 6) {
+      let x = 0;
+      while (x < w) { const len = 10 + rnd() * 90; const v = 110 + Math.floor(rnd() * 60); c.fillStyle = `rgb(${v},${v - 4},${v - 10})`; c.fillRect(x, y, len, 3); if (rnd() < 0.35) { c.fillStyle = '#d8d2c4'; c.fillRect(x + len - 3, y, 3, 3); } x += len + 3 + rnd() * 14; }
+    }
+  }, { repeat: true }),
+  /** brushed metal (package lid, pads) */
+  brushed: () => canvasTex(256, 256, (c, w, h) => {
+    const rnd = mulberry32(3);
+    c.fillStyle = '#8a8d92'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1400; i++) { const y = rnd() * h, v = 110 + Math.floor(rnd() * 70); c.fillStyle = `rgba(${v},${v},${v + 4},0.35)`; c.fillRect(0, y, w, 0.6 + rnd()); }
+  }, { repeat: true }),
+  /** fine grain (silicon, channel, oxide) — linear data, use as bump/roughness or tinted map */
+  grain: () => canvasTex(256, 256, (c, w, h) => {
+    const rnd = mulberry32(13), img = c.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) { const v = 96 + Math.floor(rnd() * 64); img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255; }
+    c.putImageData(img, 0, 0);
+  }, { repeat: true }),
+  /** package substrate: dark laminate with fine traces and pads */
+  substrate: () => canvasTex(512, 512, (c, w, h) => {
+    const rnd = mulberry32(17);
+    c.fillStyle = '#1b231e'; c.fillRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(160,150,110,.16)'; c.lineWidth = 1.2;
+    for (let i = 0; i < 90; i++) { c.beginPath(); let x = rnd() * w, y = rnd() * h; c.moveTo(x, y); for (let k = 0; k < 4; k++) { if (rnd() < 0.5) x += (rnd() - 0.5) * 160; else y += (rnd() - 0.5) * 160; c.lineTo(x, y); } c.stroke(); }
+    for (let i = 0; i < 140; i++) { c.fillStyle = `rgba(200,170,100,${(0.12 + rnd() * 0.2).toFixed(2)})`; c.beginPath(); c.arc(rnd() * w, rnd() * h, 1.5 + rnd() * 2.5, 0, 7); c.fill(); }
+  }, { repeat: true }),
+};
+/** tile a shared texture without disturbing other users of it */
+function tiled(tex, rx = 1, ry = rx) { const t = tex.clone(); t.repeat.set(rx, ry); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; return t; }
+
+/**
+ * Physically based hardware material. Matte by default; supports per-instance colour
+ * (InstancedMesh.setColorAt), a green highlight per instance (aHL attribute, via hwCells)
+ * or per material (setHL), "base darkening" that fakes contact occlusion toward the bottom
+ * of unit-box geometry, and the layer's dithered fade.
+ * o: {color, rough, metal, env, map, repeat, bump, bumpScale, roughMap, emissive, emissiveIntensity, hl, hlColor, hlGain, ao, aoY:[y0,y1], instHL, side}
+ */
+function hwMat(layer, o = {}) {
+  const rep = o.repeat ? (Array.isArray(o.repeat) ? o.repeat : [o.repeat, o.repeat]) : null;
+  const tx = (t) => (t && rep ? tiled(t, rep[0], rep[1]) : t ?? null);
+  const mat = new THREE.MeshStandardMaterial({
+    color: o.color ?? HW.steel, roughness: o.rough ?? 0.62, metalness: o.metal ?? 0.08, envMapIntensity: o.env ?? 0.85,
+    map: tx(o.map), bumpMap: tx(o.bump), bumpScale: o.bumpScale ?? 1, roughnessMap: tx(o.roughMap),
+    emissive: new THREE.Color(o.emissive ?? 0x000000), emissiveIntensity: o.emissiveIntensity ?? 1, side: o.side ?? THREE.FrontSide,
+  });
+  mat.userData.fadeU = { value: 1 };
+  mat.userData.hlU = { value: o.hl ?? 0 };
+  mat.userData.hlColU = { value: COL(o.hlColor ?? HW.hl, o.hlGain ?? 1.4) };
+  const lf = layer ? layer.fadeU : ONE_U, inst = !!o.instHL, ao = +(o.ao ?? 0), aoY = o.aoY ?? [-0.5, 0.45];
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uFade = lf; sh.uniforms.uMatFade = mat.userData.fadeU; sh.uniforms.uHL = mat.userData.hlU; sh.uniforms.uHLCol = mat.userData.hlColU;
+    sh.vertexShader = `${inst ? 'attribute float aHL;\n' : ''}varying float vHL; varying float vAOy;\n` + sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>\n  vHL = ${inst ? 'aHL' : '0.0'}; vAOy = position.y;`);
+    sh.fragmentShader = 'uniform float uFade, uMatFade, uHL; uniform vec3 uHLCol; varying float vHL; varying float vAOy;\n' + sh.fragmentShader
+      .replace('#include <color_fragment>', `#include <color_fragment>\n  ${ao > 0 ? `diffuseColor.rgb *= mix(${(1 - ao).toFixed(3)}, 1.0, smoothstep(${aoY[0].toFixed(3)}, ${aoY[1].toFixed(3)}, vAOy));` : ''}`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += uHLCol * max(uHL, vHL);')
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+      { float ff = uFade * uMatFade; if (ff < 0.999 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) > ff) discard; }`);
+  };
+  mat.customProgramCacheKey = () => `hw|${inst}|${ao}|${aoY.join(',')}`;
+  return mat;
+}
+/** highlight a whole hwMat (0..1 of the green emissive) */
+const setHL = (mat, v) => { mat.userData.hlU.value = v; };
+
+/**
+ * Instanced hardware parts (cells, fins, pads, atoms) with per-instance colour and highlight.
+ * m.put(i, [x,y,z], s | [sx,sy,sz], color?, hl?, rotY?) · m.setHL(i, v) · m.commit()
+ */
+function hwCells(layer, geo, n, mat, o = {}) {
+  const g = geo.clone();
+  g.setAttribute('aHL', new THREE.InstancedBufferAttribute(new Float32Array(n), 1));
+  const m = new THREE.InstancedMesh(g, mat, n);
+  m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
+  m.castShadow = o.cast ?? true; m.receiveShadow = o.receive ?? true;
+  m.frustumCulled = false;
+  const d = new THREE.Object3D(), c = new THREE.Color();
+  m.put = (i, p, sc, col, hl = 0, rotY = 0) => {
+    d.position.set(p[0], p[1], p[2]); d.rotation.set(0, rotY, 0);
+    if (typeof sc === 'number') d.scale.setScalar(sc); else d.scale.set(sc[0], sc[1], sc[2]);
+    d.updateMatrix(); m.setMatrixAt(i, d.matrix);
+    if (col !== undefined && col !== null) { c.set(col); m.instanceColor.setXYZ(i, c.r, c.g, c.b); }
+    g.attributes.aHL.setX(i, hl);
+  };
+  m.setHL = (i, v) => { g.attributes.aHL.setX(i, v); g.attributes.aHL.needsUpdate = true; };
+  m.commit = () => { m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; g.attributes.aHL.needsUpdate = true; };
+  return m;
+}
+/** let an object (and its children) cast and/or receive the key light's shadow */
+function shade(obj, cast = true, receive = true) { obj.traverse((x) => { if (x.isMesh) { x.castShadow = cast; x.receiveShadow = receive; } }); return obj; }
+
+/**
+ * Green highlight frame: the outline that marks "the part we are looking at" (a tile, a unit,
+ * a transistor). Lies in the XZ plane at y = 0 of its group; with o.h > 0 it becomes an
+ * outlined box. o: {t (line thickness), h, intensity, fill (translucent top, 0..1), onTop}
+ * setFrame(frame, 0..1) fades it.
+ */
+function hlFrame(layer, w, d, o = {}) {
+  const t = o.t ?? Math.max(w, d) * 0.012, h = o.h ?? 0;
+  const mat = makeShader(layer, {
+    uniforms: { uColor: { value: COL(o.color ?? HW.hl) }, uI: { value: o.intensity ?? 3.2 }, uOpacity: { value: 1 } },
+    vs: `varying float vDepth; void main(){ vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0); vDepth = -mv.z; gl_Position = projectionMatrix * mv; }`,
+    fs: `uniform vec3 uColor; uniform float uI, uOpacity; varying float vDepth; void main(){ float a = uOpacity * uFade; if (a < 0.003) discard; gl_FragColor = vec4(uColor * uI * a, a); }`,
+    transparent: true, depthWrite: false, depthTest: !o.onTop, blending: THREE.AdditiveBlending,
+  });
+  const bars = [];
+  const ring = (y) => { bars.push([0, y, -d / 2, w + t, t, t], [0, y, d / 2, w + t, t, t], [-w / 2, y, 0, t, t, d], [w / 2, y, 0, t, t, d]); };
+  ring(0);
+  if (h > 0) { ring(h); for (const [x, z] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) bars.push([x, h / 2, z, t, h, t]); }
+  const m = new THREE.InstancedMesh(BOX, mat, bars.length);
+  const dd = new THREE.Object3D();
+  bars.forEach(([x, y, z, sx, sy, sz], i) => { dd.position.set(x, y, z); dd.scale.set(sx, sy, sz); dd.updateMatrix(); m.setMatrixAt(i, dd.matrix); });
+  m.frustumCulled = false; m.renderOrder = 5;
+  const grp = new THREE.Group(); grp.add(m);
+  if (o.fill) {
+    const fm = makeShader(layer, {
+      uniforms: { uColor: { value: COL(o.color ?? HW.hl) }, uOpacity: { value: 1 }, uK: { value: o.fill } },
+      vs: STD_VS,
+      fs: `uniform vec3 uColor; uniform float uOpacity, uK; varying vec2 vUv; void main(){ vec2 e = min(vUv, 1.0 - vUv); float edge = exp(-min(e.x, e.y) * 18.0); float a = uK * uOpacity * uFade * (0.25 + 0.75 * edge); if (a < 0.003) discard; gl_FragColor = vec4(uColor * a, a); }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const top = new THREE.Mesh(PLANES.c, fm); top.rotation.x = -Math.PI / 2; top.scale.set(w, d, 1); top.position.y = h; top.renderOrder = 5; grp.add(top);
+  }
+  grp.userData.mats = grp.children.map((c) => c.material);
+  return grp;
+}
+const setFrame = (f, v) => { for (const m of f.userData.mats) m.uniforms.uOpacity.value = v; f.visible = v > 0.003; };
+
+/**
+ * Callouts: small labels in the page (crisp text, like an engineering drawing), each pinned by a
+ * leader line to a point in a layer. Scenes add them in their constructors; a rebuild clears them.
+ *   Callouts.add('gates', [x,y,z] | (T) => [x,y,z], 'Full adder · bit 3', 'A = 1  B = 1  carry in = 1', (T) => 0..1 | [t0, t1], { side: 'up'|'down'|'left'|'right', lead: px })
+ * Text is always set with textContent (program identifiers reach these labels).
+ */
+const Callouts = {
+  items: [], _v: new THREE.Vector3(),
+  root() { return document.getElementById('callouts'); },
+  add(layerId, at, title, sub = '', vis = [0, 0], o = {}) {
+    const el = document.createElement('div');
+    el.className = `co ${o.side ?? 'up'}`;
+    el.style.setProperty('--lead', `${o.lead ?? 34}px`);
+    const box = document.createElement('div'); box.className = 'box';
+    const tt = document.createElement('span'), st = document.createElement('small');
+    box.append(tt, st);
+    const ld = document.createElement('i'); ld.className = 'ld';
+    const dt = document.createElement('i'); dt.className = 'dt';
+    el.append(box, ld, dt);
+    this.root()?.appendChild(el);
+    const it = { L: LAYER[layerId], at, vis, el, a: -1, x: NaN, y: NaN, tt, st, fadeIn: o.fadeIn ?? 0.35, fadeOut: o.fadeOut ?? 0.35 };
+    it.set = (title2, sub2 = '') => { if (tt.textContent !== title2) tt.textContent = title2; if (st.textContent !== sub2) st.textContent = sub2; };
+    it.set(String(title), String(sub ?? ''));
+    this.items.push(it);
+    return it;
+  },
+  clear() { for (const it of this.items) it.el.remove(); this.items = []; },
+  update(T) {
+    if (!this.items.length) return;
+    camera.updateMatrixWorld();
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+    const W = innerWidth, H = innerHeight, v = this._v;
+    for (const it of this.items) {
+      let a = typeof it.vis === 'function' ? it.vis(T) : win(T, it.vis[0], it.vis[1], it.fadeIn, it.fadeOut);
+      a *= it.L.fade > 0.002 ? Math.min(1, it.L.fade * 1.2) : 0;
+      let x = it.x, y = it.y;
+      if (a > 0.01) {
+        const p = typeof it.at === 'function' ? it.at(T) : it.at;
+        it.L.toRoot(v.set(p[0], p[1], p[2]), v);
+        LayerSystem.toFrame(v, v);
+        v.project(camera);
+        if (v.z > 1 || v.z < -1) a = 0;
+        x = (v.x * 0.5 + 0.5) * W; y = (-v.y * 0.5 + 0.5) * H;
+        a *= clamp(1 - Math.max(0, Math.abs(v.x) - 0.9) / 0.1) * clamp(1 - Math.max(0, Math.abs(v.y) - 0.88) / 0.1);
+      } else a = 0;
+      const aq = Math.round(a * 100) / 100;   // (the position test below is NaN-safe: the first placement always writes)
+      if (aq !== it.a) { it.a = aq; it.el.style.opacity = String(aq); it.el.style.visibility = aq > 0 ? 'visible' : 'hidden'; }
+      if (aq > 0 && !(Math.abs(x - it.x) <= 0.25 && Math.abs(y - it.y) <= 0.25)) { it.x = x; it.y = y; it.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0)`; }
+    }
+  },
+};
+
+// =====================================================================
 // 5 · LAYER SYSTEM — nested scales, re-based every frame
 // =====================================================================
 const LAYERS = [];
@@ -1204,6 +1460,7 @@ class Layer {
     this.fog = o.fog ?? 0.01;         // fog density in this layer's units
     this.bg = new THREE.Color(o.bg ?? 0x020308);
     this.dof = o.dof ?? [0.45, 1.2, 1];   // [sharp range, ramp, amount] (log-distance units)
+    this.aoK = o.ao ?? [0.7, 0.05];        // [ambient-occlusion strength, radius as a fraction of camera distance]
     this.sigma = parent ? parent.sigma * scale : 1;
     this.o = parent ? parent.o.clone().addScaledVector(this.anchor, parent.sigma) : V3();
     this.index = LAYERS.length;
@@ -1343,6 +1600,8 @@ class PostFX {
     this.rtScene = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: QUALITY.msaa, depthTexture: new THREE.DepthTexture(4, 4), minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
     this.mips = Array.from({ length: QUALITY.bloomLevels }, () => new THREE.WebGLRenderTarget(4, 4, hf));
     this.blur = Array.from({ length: 3 }, () => new THREE.WebGLRenderTarget(4, 4, hf));
+    // ambient occlusion at half resolution (r = occlusion, g = view depth for the depth-aware blur)
+    this.ao = [0, 1].map(() => new THREE.WebGLRenderTarget(4, 4, hf));
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
     this.quad.frustumCulled = false;
@@ -1398,18 +1657,68 @@ class PostFX {
         }`,
       depthTest: false, depthWrite: false,
     });
+    // SAO-style ambient occlusion from the scene depth: dense hardware reads as dense because its crevices darken
+    this.matAO = new THREE.ShaderMaterial({
+      uniforms: { tDepth: { value: null }, uTexel: { value: new THREE.Vector2() }, uNear: { value: 0.1 }, uFar: { value: 100 }, uTanY: { value: 0.36 }, uAspect: { value: 1.7 }, uRadius: { value: 1 }, uBias: { value: 0.06 } },
+      vertexShader: VS,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tDepth; uniform vec2 uTexel; uniform float uNear, uFar, uTanY, uAspect, uRadius, uBias; varying vec2 vUv;
+        float linD(float d){ float z = d * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
+        vec3 vpos(vec2 uv){ float z = linD(texture2D(tDepth, uv).r); vec2 n = uv * 2.0 - 1.0; return vec3(n.x * uTanY * uAspect * z, n.y * uTanY * z, -z); }
+        float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+        void main(){
+          float d0 = texture2D(tDepth, vUv).r;
+          if (d0 >= 0.999999) { gl_FragColor = vec4(1.0, 1e4, 0.0, 1.0); return; }
+          vec3 p = vpos(vUv);
+          vec3 pr = vpos(vUv + vec2(uTexel.x, 0.0)), pl = vpos(vUv - vec2(uTexel.x, 0.0)), pu = vpos(vUv + vec2(0.0, uTexel.y)), pd = vpos(vUv - vec2(0.0, uTexel.y));
+          vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+          vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+          vec3 n = normalize(cross(dx, dy));
+          float z = -p.z;
+          float rUV = clamp(uRadius / (z * 2.0 * uTanY), 0.0015, 0.09);
+          float ang = h12(gl_FragCoord.xy) * 6.2831853;
+          float ao = 0.0, r2 = uRadius * uRadius;
+          for (int i = 0; i < 12; i++) {
+            float fi = (float(i) + 0.5) / 12.0;
+            float a = ang + float(i) * 2.3999632;
+            vec2 off = vec2(cos(a) / uAspect, sin(a)) * rUV * fi;
+            vec3 v = vpos(vUv + off) - p;
+            float vv = dot(v, v);
+            float f = max(r2 - vv, 0.0) / r2;
+            ao += f * f * max(dot(v, n) * inversesqrt(vv + 1e-9) - uBias, 0.0);
+          }
+          gl_FragColor = vec4(clamp(1.0 - ao * 2.2 / 12.0, 0.0, 1.0), z, 0.0, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.matAOBlur = new THREE.ShaderMaterial({
+      uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() } },
+      vertexShader: VS,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tSrc; uniform vec2 uTexel; varying vec2 vUv;
+        void main(){
+          vec2 c = texture2D(tSrc, vUv).rg; float s = 0.0, w = 0.0;
+          for (int y = -2; y < 2; y++) for (int x = -2; x < 2; x++) {
+            vec2 t = texture2D(tSrc, vUv + (vec2(float(x), float(y)) + 0.5) * uTexel).rg;
+            float ww = exp(-abs(t.g - c.g) / max(c.g * 0.04, 1e-5));
+            s += t.r * ww; w += ww;
+          }
+          gl_FragColor = vec4(s / max(w, 1e-5), c.g, 0.0, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
     this.matComp = new THREE.ShaderMaterial({
       uniforms: {
         tScene: { value: null }, tDepth: { value: null }, tBloom: { value: null }, tB1: { value: null }, tB2: { value: null }, tB3: { value: null },
         uRes: { value: new THREE.Vector2(1, 1) }, uB3Texel: { value: new THREE.Vector2() }, uNear: { value: 0.1 }, uFar: { value: 100 },
         uFocus: { value: 10 }, uDof: { value: new THREE.Vector3(0.4, 1.0, 1.0) }, uBloom: { value: 0.9 }, uExposure: { value: 1.0 },
         uVignette: { value: 0.6 }, uGrain: { value: 0.045 }, uCA: { value: 0.0025 }, uFade: { value: 1.0 }, uTime: { value: 0 }, uFlash: { value: 0 },
-        uLift: { value: new THREE.Color(0.004, 0.006, 0.012) },
+        uLift: { value: new THREE.Color(0.005, 0.005, 0.006) }, tAO: { value: null }, uAO: { value: 0 },
       },
       vertexShader: VS,
       fragmentShader: /* glsl */`
-        uniform sampler2D tScene, tDepth, tBloom, tB1, tB2, tB3;
-        uniform vec2 uRes, uB3Texel; uniform float uNear, uFar, uFocus, uBloom, uExposure, uVignette, uGrain, uCA, uFade, uTime, uFlash;
+        uniform sampler2D tScene, tDepth, tBloom, tB1, tB2, tB3, tAO;
+        uniform vec2 uRes, uB3Texel; uniform float uNear, uFar, uFocus, uBloom, uExposure, uVignette, uGrain, uCA, uFade, uTime, uFlash, uAO;
         uniform vec3 uDof, uLift; varying vec2 vUv;
         float linD(float d){ float z = d * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear)); }
         vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
@@ -1431,8 +1740,9 @@ class PostFX {
           vec3 b3 = tent(tB3, uv, uB3Texel);
           vec3 blurred = coc < 0.5 ? mix(b1, b2, smoothstep(0.15, 0.5, coc)) : mix(b2, b3, smoothstep(0.5, 1.0, coc));
           vec3 col = mix(sharp, blurred, smoothstep(0.0, 0.35, coc));
+          if (uAO > 0.0) col *= mix(1.0, texture2D(tAO, uv).r, uAO);
           col += texture2D(tBloom, uv).rgb * uBloom;
-          col += uFlash * vec3(0.55, 0.85, 1.0);
+          col += uFlash * vec3(0.7, 1.0, 0.55);
           col = col * uExposure + uLift;
           col = aces(col);
           float vig = 1.0 - smoothstep(0.2, 0.95, length(cc * vec2(uRes.x / uRes.y, 1.0)) * 0.78);
@@ -1446,7 +1756,7 @@ class PostFX {
         }`,
       depthTest: false, depthWrite: false,
     });
-    this.params = { focus: 10, dof: [0.4, 1, 1], bloom: 0.9, exposure: 1, vignette: 0.6, grain: 0.045, ca: 0.0025, fade: 1, flash: 0, threshold: 0.95 };
+    this.params = { focus: 10, dof: [0.4, 1, 1], bloom: 0.45, exposure: 1, vignette: 0.5, grain: 0.028, ca: 0.0008, fade: 1, flash: 0, threshold: 1.1, ao: 0, aoRadius: 1 };
   }
   setSize(w, h) {
     this.w = w; this.h = h;
@@ -1455,6 +1765,7 @@ class PostFX {
     for (const m of this.mips) { mw = Math.max(1, mw >> 1); mh = Math.max(1, mh >> 1); m.setSize(mw, mh); }
     let bw = w, bh = h;
     for (const b of this.blur) { bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1); b.setSize(bw, bh); }
+    for (const a of this.ao) a.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
     this.matComp.uniforms.uRes.value.set(w, h);
   }
   _pass(mat, target, clear = true) {
@@ -1488,8 +1799,20 @@ class PostFX {
     f.tDepth.value = this.rtScene.depthTexture; f.uNear.value = camera.near; f.uFar.value = camera.far; f.uFocus.value = P.focus; f.uDof.value.set(...P.dof);
     src = this.rtScene;
     this.blur.forEach((b, i) => { f.tSrc.value = src.texture; f.uTexel.value.set(1 / src.width, 1 / src.height); f.uFirst.value = i === 0 ? 1 : 0; this._pass(this.matDof, b); src = b; });
+    // ambient occlusion (half resolution, depth-aware blur)
+    const useAO = QUALITY.ao && P.ao > 0.01;
+    if (useAO) {
+      const a = this.matAO.uniforms;
+      a.tDepth.value = this.rtScene.depthTexture; a.uTexel.value.set(1 / this.w, 1 / this.h);
+      a.uNear.value = camera.near; a.uFar.value = camera.far; a.uTanY.value = Math.tan((camera.fov * DEG) / 2); a.uAspect.value = camera.aspect; a.uRadius.value = P.aoRadius;
+      this._pass(this.matAO, this.ao[0]);
+      const bl = this.matAOBlur.uniforms;
+      bl.tSrc.value = this.ao[0].texture; bl.uTexel.value.set(1 / this.ao[0].width, 1 / this.ao[0].height);
+      this._pass(this.matAOBlur, this.ao[1]);
+    }
     // composite
     const c = this.matComp.uniforms;
+    c.tAO.value = this.ao[1].texture; c.uAO.value = useAO ? P.ao : 0;
     c.tScene.value = this.rtScene.texture; c.tDepth.value = this.rtScene.depthTexture; c.tBloom.value = this.mips[0].texture;
     c.tB1.value = this.blur[0].texture; c.tB2.value = this.blur[1].texture; c.tB3.value = this.blur[2].texture;
     c.uB3Texel.value.set(1 / this.blur[2].width, 1 / this.blur[2].height);
@@ -1508,17 +1831,18 @@ function buildEnvironment() {
   env.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide,
     vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: 'varying vec3 vP; void main(){ float y = normalize(vP).y; vec3 c = mix(vec3(0.003, 0.005, 0.01), vec3(0.035, 0.06, 0.1), smoothstep(-0.3, 0.9, y)); gl_FragColor = vec4(c, 1.0); }',
+    fragmentShader: 'varying vec3 vP; void main(){ float y = normalize(vP).y; vec3 c = mix(vec3(0.006, 0.006, 0.007), vec3(0.05, 0.05, 0.052), smoothstep(-0.35, 0.95, y)); gl_FragColor = vec4(c, 1.0); }',
   })));
   const panel = (w, h, pos, color, k) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: COL(color, k), side: THREE.DoubleSide }));
     m.position.set(...pos); m.lookAt(0, 0, 0); env.add(m);
   };
-  panel(34, 7, [0, 40, -4], 0xe8f6ff, 2.6);
-  panel(9, 34, [44, 8, 6], C.cyan, 1.1);
-  panel(9, 30, [-44, 6, 10], C.violet, 0.8);
-  panel(46, 3, [0, 10, -46], 0xffffff, 1.4);
-  panel(24, 2.5, [8, -4, 44], 0x3a6fa0, 0.5);
+  // a photographic studio: a big warm softbox up-left (the key), a cool strip fill, a thin top light
+  panel(30, 18, [-30, 32, 18], 0xffe2bd, 2.4);
+  panel(12, 26, [42, 10, -8], 0xb6c6da, 0.7);
+  panel(40, 4, [0, 44, -10], 0xffffff, 0.9);
+  panel(30, 3, [10, 12, -44], 0xfff0da, 0.8);
+  panel(60, 60, [0, -34, 0], 0x2a2724, 0.35);
   const pm = new THREE.PMREMGenerator(renderer);
   const tex = pm.fromScene(env, 0.03).texture;
   pm.dispose();
@@ -1630,15 +1954,15 @@ class Signal {
     this.group = new THREE.Group();
     scene.add(this.group);
     this.core = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), makeShader(null, {
-      uniforms: { uI: { value: 4.2 }, uOpacity: { value: 1 }, uColor: { value: COL(0xd8f7ff) } },
+      uniforms: { uI: { value: 3.0 }, uOpacity: { value: 1 }, uColor: { value: COL(0xecffdc) } },
       vs: STD_VS,
       fs: `uniform float uI, uOpacity; uniform vec3 uColor; varying vec3 vN; varying vec3 vV; void main(){ float f = abs(dot(normalize(vN), normalize(vV))); if (uOpacity < 0.999 && ign(gl_FragCoord.xy) > uOpacity) discard; gl_FragColor = vec4(uColor * uI * (0.6 + 0.4 * f), 1.0); }`,
     }));
     this.core.renderOrder = 4;
-    this.halo = glowSprite(null, { color: C.cyan, intensity: 0.9, pow: 3.4, core: 0.7, renderOrder: 7 });
-    this.halo2 = glowSprite(null, { color: C.blue, intensity: 0.35, pow: 1.6, core: 0, renderOrder: 7 });
+    this.halo = glowSprite(null, { color: HW.hl, intensity: 0.6, pow: 3.4, core: 0.6, renderOrder: 7 });
+    this.halo2 = glowSprite(null, { color: HW.hlDim, intensity: 0.14, pow: 1.6, core: 0, renderOrder: 7 });
     // anamorphic streak
-    this.streak = glowSprite(null, { color: 0x9fe8ff, intensity: 0.55, pow: 4.0, core: 0.2, renderOrder: 7 });
+    this.streak = glowSprite(null, { color: 0xd6ffb0, intensity: 0.22, pow: 4.0, core: 0.2, renderOrder: 7 });
     this.group.add(this.core, this.halo, this.halo2, this.streak);
     // trail (points sampled back along the path)
     this.trailN = 36;
@@ -1648,7 +1972,7 @@ class Signal {
     this.trailMat = makeShader(null, {
       uniforms: { uSize: { value: 0.1 }, uOpacity: { value: 1 } },
       vs: `attribute float aK; uniform float uSize; varying float vK; void main(){ vK = aK; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(uSize * (1.0 - aK * 0.85) * uPx / max(-mv.z, 1e-6), 1.0, 40.0); gl_Position = projectionMatrix * mv; }`,
-      fs: `uniform float uOpacity; varying float vK; void main(){ vec2 c = gl_PointCoord - 0.5; float a = exp(-dot(c, c) * 14.0) * pow(1.0 - vK, 1.6) * uOpacity * 0.55; if (a < 0.003) discard; gl_FragColor = vec4(vec3(0.45, 0.85, 1.0) * 2.2, a); }`,
+      fs: `uniform float uOpacity; varying float vK; void main(){ vec2 c = gl_PointCoord - 0.5; float a = exp(-dot(c, c) * 14.0) * pow(1.0 - vK, 1.6) * uOpacity * 0.55; if (a < 0.003) discard; gl_FragColor = vec4(vec3(0.62, 1.0, 0.36) * 1.8, a); }`,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     this.trail = new THREE.Points(g, this.trailMat);
@@ -2430,14 +2754,14 @@ const ALU0 = { x: -24, z: 13, h: 1.2 };           // ALU 0 in the core floorplan
 const FA_X = (i) => 35 - 10 * i;                  // full-adder cell centres in the gate layer
 const XOR2_OF_FA3 = V3(FA_X(3) - 1.4, 0.72, 1.6);  // the gate we dive into
 
-new Layer('lab', null, [0, 0, 0], 1, { dNom: 12, fog: 0.011, bg: 0x020308, dof: [0.55, 1.5, 0.85], fadeOut: [0.5, 0.16] });
-new Layer('die', LAYER.lab, [PED.x, DIE_TOP, PED.z], 2.2 / 40, { dNom: 40, fog: 0.004, bg: 0x020309, dof: [0.35, 1.1, 1], fadeIn: [520, 260], fadeOut: [3.2, 1.3] });
-new Layer('core', LAYER.die, [CORE0.x, CORE0.y, CORE0.z], 0.25, { dNom: 34, fog: 0.005, bg: 0x02040a, dof: [0.3, 1.0, 1], fadeIn: [260, 120], fadeOut: [4.5, 1.6] });
-new Layer('alu', LAYER.core, [ALU0.x, ALU0.h + 0.02, ALU0.z], 8 / 48, { dNom: 30, fog: 0.006, bg: 0x02040b, dof: [0.28, 0.9, 1], fadeIn: [300, 125], fadeOut: [4.0, 1.4] });
-new Layer('gates', LAYER.alu, [0, 1.42, 0], 24 / 96, { dNom: 26, fog: 0.007, bg: 0x02040a, dof: [0.26, 0.85, 1], fadeIn: [330, 130], fadeOut: [6, 3] });
-new Layer('xtor', LAYER.gates, [XOR2_OF_FA3.x, XOR2_OF_FA3.y, XOR2_OF_FA3.z], 2.4 / 36, { dNom: 24, fog: 0.008, bg: 0x03030b, dof: [0.24, 0.8, 1], fadeIn: [340, 140], fadeOut: [10, 5] });
-new Layer('si', LAYER.xtor, [3, 1.4, 6.6], 0.12, { dNom: 24, fog: 0.008, bg: 0x04030c, dof: [0.22, 0.7, 1], fadeIn: [230, 100], fadeOut: [8, 4] });
-new Layer('lat', LAYER.si, [0, 2.4, -1.2], 0.1, { dNom: 22, fog: 0.012, bg: 0x04030d, dof: [0.45, 1.0, 0.55], fadeIn: [200, 85] });
+new Layer('lab', null, [0, 0, 0], 1, { dNom: 12, fog: 0.011, bg: 0x08090b, dof: [0.55, 1.5, 0.85], fadeOut: [0.5, 0.16] });
+new Layer('die', LAYER.lab, [PED.x, DIE_TOP, PED.z], 2.2 / 40, { dNom: 40, fog: 0.004, bg: 0x0c0d0f, dof: [0.35, 1.1, 1], fadeIn: [520, 260], fadeOut: [3.2, 1.3] });
+new Layer('core', LAYER.die, [CORE0.x, CORE0.y, CORE0.z], 0.25, { dNom: 34, fog: 0.005, bg: 0x0d0e10, dof: [0.3, 1.0, 1], fadeIn: [260, 120], fadeOut: [4.5, 1.6] });
+new Layer('alu', LAYER.core, [ALU0.x, ALU0.h + 0.02, ALU0.z], 8 / 48, { dNom: 30, fog: 0.006, bg: 0x0e0f11, dof: [0.28, 0.9, 1], fadeIn: [300, 125], fadeOut: [4.0, 1.4] });
+new Layer('gates', LAYER.alu, [0, 1.42, 0], 24 / 96, { dNom: 26, fog: 0.007, bg: 0x0f1012, dof: [0.26, 0.85, 1], fadeIn: [330, 130], fadeOut: [6, 3] });
+new Layer('xtor', LAYER.gates, [XOR2_OF_FA3.x, XOR2_OF_FA3.y, XOR2_OF_FA3.z], 2.4 / 36, { dNom: 24, fog: 0.008, bg: 0x101113, dof: [0.24, 0.8, 1], fadeIn: [340, 140], fadeOut: [10, 5] });
+new Layer('si', LAYER.xtor, [3, 1.4, 6.6], 0.12, { dNom: 24, fog: 0.008, bg: 0x121315, dof: [0.22, 0.7, 1], fadeIn: [230, 100], fadeOut: [8, 4] });
+new Layer('lat', LAYER.si, [0, 2.4, -1.2], 0.1, { dNom: 22, fog: 0.012, bg: 0x141518, dof: [0.45, 1.0, 0.55], fadeIn: [200, 85] });
 
 /** shared registry so scenes can reference each other */
 const S = {};
@@ -6395,15 +6719,37 @@ class Timeline {
 setLoad(0.4, 'BUILDING THE LAB');
 await new Promise((r) => setTimeout(r, 30));
 scene.environment = buildEnvironment();
-const key = new THREE.DirectionalLight(0xdff2ff, 1.3); key.position.set(-0.5, 1, 0.7); scene.add(key);
-const rim = new THREE.DirectionalLight(0x9d8aff, 0.9); rim.position.set(0.8, 0.4, -1); scene.add(rim);
-scene.add(new THREE.HemisphereLight(0x3a5a88, 0x05070c, 0.35));
+// studio rig: a warm key from the upper left (casting the only shadow map), a cool fill, a low sky/ground term.
+// Lights live in the render frame, so every frame they are re-aimed at the camera target and the shadow
+// camera is re-fitted to the current scale — shadows work the same at 10 cm and at 10 nm.
+const key = new THREE.DirectionalLight(0xffe6c6, 2.5); scene.add(key, key.target);
+const fillL = new THREE.DirectionalLight(0xafc2da, 0.55); scene.add(fillL, fillL.target);
+const rim = new THREE.DirectionalLight(0xfff1dd, 0.45); scene.add(rim, rim.target);
+scene.add(new THREE.HemisphereLight(0x8b939c, 0x0b0c0e, 0.32));
+if (QUALITY.shadowMap) {
+  key.castShadow = true;
+  key.shadow.mapSize.set(QUALITY.shadowMap, QUALITY.shadowMap);
+  key.shadow.radius = 3;
+}
+const Lights = {
+  dir: V3(-0.55, 1, 0.42).normalize(), fillDir: V3(0.9, 0.35, -0.6).normalize(), rimDir: V3(0.25, 0.5, -1).normalize(), _t: V3(),
+  follow(cam, Df) {
+    const t = LayerSystem.toFrame(cam.T, this._t);
+    for (const [l, d] of [[key, this.dir], [fillL, this.fillDir], [rim, this.rimDir]]) { l.target.position.copy(t); l.position.copy(t).addScaledVector(d, Df * 4); l.target.updateMatrixWorld(); }
+    if (key.castShadow) {
+      const sc = key.shadow.camera, e = Df * 1.5;
+      sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = Df * 0.2; sc.far = Df * 9; sc.updateProjectionMatrix();
+      key.shadow.normalBias = (2 * e / key.shadow.mapSize.x) * 1.6; key.shadow.bias = -0.0002;
+    }
+  },
+};
 
 const SceneManager = {
   scenes: [], objects: [],
   /** build every scene for the current STORY; returns the objects they added to layer groups */
   build() {
     const before = new Map(LAYERS.map((L) => [L, new Set(L.group.children)]));
+    Callouts.clear();
     this.scenes = [];
     this.buildScenes();
     this.objects = LAYERS.flatMap((L) => L.group.children.filter((o) => !before.get(L).has(o)));
@@ -6486,6 +6832,7 @@ function buildCamera() {
     K(33.7, 'lab', [PED.x, 1.3, PED.z], 5.6, -24, 48),
     K(35.3, 'die', [6, 0, 0.5], 52, -14, 56),
     K(36.5, 'die', [-8, 0, -8], 30, -10, 56),
+    // core: fetch → decode → execute → registers → toward the ALU
     K(37.7, 'core', [-11, 0.5, -3], 42, -8, 52),
     K(38.9, 'core', [-14, 0.8, -12], 24, -12, 44),
     K(40.3, 'core', [6.5, 2.0, -11], 23, 2, 38),
@@ -6545,6 +6892,7 @@ function buildSignal() {
   const s0 = TL.stream + 0.49;
   P(s0, 'lab', mc.channel.getPointAt(0), 0.07, 1, { ease: 'io' });
   k.push({ t: s0 + mc.TRAVEL, L: 'lab', path: { curve: mc.channel, u0: 0, u1: 1 }, r: 0.07, i: 1, ease: 'io' });
+  // memory → package
   const addCell = cellPos(SLABS[0], BYTE_COL(mem.featMid), FRONT_ROW).add(V3(0, 0.35, 0));
   P(TL.land, 'lab', addCell, 0.07, 1);
   P(TL.leave, 'lab', addCell, 0.07, 1);
@@ -6555,6 +6903,7 @@ function buildSignal() {
   P(TL.die + 0.9, 'die', [-7, 0.45, 0.5], 0.7, 1);
   P(TL.die + 1.3, 'die', [-11.5, 0.45, -3.45], 0.7, 1);
   P(TL.toCore - 0.2, 'die', [-11.5, 0.45, -5.5], 0.6, 1);
+  // core: fetch → decode → execute → toward the ALU
   P(TL.toCore + 0.5, 'core', [0, 1.6, 20.2], 0.55, 1);
   P(TL.toCore + 1.0, 'core', [-29.6, 1.3, 19.5], 0.5, 1);
   P(TL.fetch - 0.3, 'core', [-29.6, 1.3, -13], 0.5, 1, { ease: 'lin' });
@@ -6564,21 +6913,26 @@ function buildSignal() {
   P(TL.split, 'core', [UNIT.dec.x, 2.0, UNIT.dec.z], 0.7, 1.4);
   for (let t = TL.split + 0.2; t <= TL.exec + 1.7; t += 0.15) P(t, 'core', core.packetPos(3, t).add(V3(0, 0.5, 0)), 0.45, 1, { ease: 'lin' });
   P(TL.toALU + 0.3, 'core', [ALU0.x, 1.9, ALU0.z], 0.45, 1);
+  // ALU
   P(TL.aluIn, 'alu', [0, 3.2, -9], 0.55, 1);
   P(TL.aluRip, 'alu', [0, 2.2, -1.5], 0.55, 1.1);
   P(TL.gIn, 'alu', [6, 1.7, 0], 0.4, 1);
+  // gates: ride the carry front
   for (let t = TL.gIn + 0.3; t <= TL.vg - 0.4; t += 0.15) { const f = g.carryFront(g.tau(t)); P(t, 'gates', [f.x, 0.9, f.z], 0.32, 1, { ease: 'lin' }); }
+  // transistors
   P(TL.vg - 0.2, 'xtor', [3, 6.8, -12], 0.45, 1);
   P(TL.vg + 0.4, 'xtor', [3, 6.8, -2.4], 0.45, 1);
   P(TL.vg + 0.8, 'xtor', [3, 3.0, 0], 0.45, 1);
   P(TL.chan + 0.6, 'xtor', [3, 2.0, 7.6], 0.4, 1);
   P(TL.si - 0.4, 'xtor', [3, 1.6, 7.0], 0.35, 1);
+  // silicon → lattice
   P(TL.si + 0.6, 'si', [-2, 2.8, 0.4], 0.5, 1);
   P(TL.lattice - 0.3, 'si', [0, 2.6, -0.4], 0.35, 0.8);
   P(TL.lattice + 0.6, 'lat', [-8, -1.5, 0], 0.55, 1);
   P(TL.flip, 'lat', [6, -1.5, 0], 0.55, 1.2);
   P(TL.flip + 0.3, 'lat', [8, -1.5, 0], 0.6, 1.3);
   P(TL.pull + 0.4, 'lat', [9, -1.5, 0], 0.4, 0);
+  // back to the source
   const ret = src.resultTag.position.clone().add(PC).add(V3(0.9, 0.55, 0.3));
   P(TL.overview - 0.6, 'lab', ret, 0.02, 0);
   P(TL.overview + 0.4, 'lab', ret, 0.2, 1.3);
@@ -6623,9 +6977,28 @@ function fieldWidth(Droot) {
 }
 function fmtLen(m) {
   const u = [[1, 'm'], [1e-3, 'mm'], [1e-6, 'µm'], [1e-9, 'nm'], [1e-12, 'pm']];
-  for (const [s, n] of u) if (m >= s * 0.999) { const v = m / s; return `≈ ${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${n}`; }
-  return `≈ ${(m / 1e-12).toFixed(1)} pm`;
+  const f = (v) => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));   // three significant figures
+  for (const [s, n] of u) if (m >= s * 0.9995) return `≈ ${f(m / s)} ${n}`;
+  return `≈ ${f(m / 1e-12)} pm`;
 }
+/** FIELD OF VIEW ruler: a log scale from 10 m to 0.1 nm with a marker at the current field width */
+const FOV = {
+  TICKS: [[1, '10 m'], [0, '1 m'], [-1, '10 cm'], [-2, '1 cm'], [-3, '1 mm'], [-4, '100 µm'], [-5, '10 µm'], [-6, '1 µm'], [-7, '100 nm'], [-8, '10 nm'], [-9, '1 nm'], [-10, '0.1 nm']],
+  pos: (lg) => ((1 - lg) / 11) * 100,
+  init() {
+    this.el = $('#fov'); this.mk = this.el.querySelector('.mk'); this.txt = $('#fovTxt');
+    for (const [lg, name] of this.TICKS) { const t = document.createElement('div'); t.className = 'tk'; t.textContent = name; t.style.top = `${this.pos(lg)}%`; this.el.appendChild(t); }
+    this.on = null; this.top = ''; this.label = '';
+  },
+  update(on, m) {
+    if (on !== this.on) { this.on = on; this.el.classList.toggle('on', on); }
+    if (!on || !(m > 0)) return;
+    const top = `${this.pos(clamp(Math.log10(m), -10, 1)).toFixed(2)}%`;
+    if (top !== this.top) { this.top = top; this.mk.style.top = top; }
+    const label = fmtLen(m);
+    if (label !== this.label) { this.label = label; this.txt.textContent = label; }
+  },
+};
 
 const HUD = {
   el: {
@@ -6672,6 +7045,7 @@ const HUD = {
   init(timeline, director) {
     this.tl = timeline; this.dir = director;
     const e = this.el;
+    FOV.init();
     this.ticks = [];
     STAGES.forEach((s, i) => {
       const b = document.createElement('button');
@@ -6783,7 +7157,11 @@ const HUD = {
     // scale readout (only meaningful once we are at CPU scale)
     const showScale = T > TL.pkg - 0.5 && T < TL.overview - 1.5;
     this.set('scaleOp', e.scale.style, showScale ? '1' : '0', 'opacity');
-    if (showScale) this.set('scaleTxt', e.scaleTxt, fmtLen(fieldWidth(camRootD)));
+    const fw = fieldWidth(camRootD);
+    if (showScale) this.set('scaleTxt', e.scaleTxt, fmtLen(fw));
+    // the ruler steps aside for the reality-check panel on screens too narrow for both
+    FOV.update(showScale && !(e.reality.classList.contains('on') && innerWidth < 1180), fw);
+    Callouts.update(T);
     // process panel
     this.set('procOp', e.proc.style, T > TL.tower + 0.3 && T < TL.toCore + 0.5 ? '1' : '0', 'opacity');
     this.set('procIp', e.procIp, T < TL.ip1 ? '0x00401231' : '0x00401234');
@@ -7118,7 +7496,7 @@ const fpsEl = $('#fps');
 if (PARAMS.has('fps')) fpsEl.style.display = 'block';
 
 const bg = LAYERS[0].bg.clone(), bgTarget = new THREE.Color();
-const dofNow = [0.5, 1.4, 0.9];
+const dofNow = [0.5, 1.4, 0.9], aoNow = [0.7, 0.05];
 let wall = 0, lastNow = performance.now(), frames = 0, acc = 0, perfT = 0, fpsShown = 0, warm = 0, slow = 0;
 const tmpV = V3();
 
@@ -7139,25 +7517,27 @@ function renderFrame(dt) {
   if (aspect < 0.95) { const k = Math.pow(clamp(0.95 / aspect, 1, 2), 0.55); cam.D *= k; cam.pos.sub(cam.T).multiplyScalar(k).add(cam.T); }
   const F = LayerSystem.rebase(cam);
   const Df = LayerSystem.Df;
+  Lights.follow(cam, Df);
   G.uFogD.value = 0.055 / Df;
   G.uPx.value = post.h / (2 * Math.tan((camera.fov * DEG) / 2));
   const k = 1 - Math.exp(-dt * 3);
   bgTarget.copy(F.bg); bg.lerp(bgTarget, k); G.uFogC.value.copy(bg);
   for (let i = 0; i < 3; i++) dofNow[i] += (F.dof[i] - dofNow[i]) * k;
+  for (let i = 0; i < 2; i++) aoNow[i] += (F.aoK[i] - aoNow[i]) * k;
   SceneManager.update(T);
   signal.update(T);
   // dust
   const du = dust.mat.uniforms;
   odo(T, tmpV); du.uOdo.value.copy(tmpV).divideScalar(2.6); du.uBox.value = Df * 2.6; du.uCam.value.copy(camera.position);
-  du.uOpacity.value = 0.85 * seg(T, 0.6, 4) * (1 - 0.85 * win(T, TL.lattice - 0.8, TL.pull + 0.4, 0.8, 0.4));
+  du.uOpacity.value = 0.3 * seg(T, 0.6, 4) * (1 - 0.75 * seg(T, TL.pkg - 1, TL.pkg + 1)) * (1 - 0.85 * win(T, TL.lattice - 0.8, TL.pull + 0.4, 0.8, 0.4));
   // post
   const P = post.params;
   P.focus = Df;
   P.dof = [dofNow[0], dofNow[1], dofNow[2] * (T < TL.panel ? 0.6 : 1)];
   P.fade = seg(T, 0, 1.4) * (1 - seg(T, TL.dark - 0.4, TL.dark + 0.9) * 0.93);
-  P.flash = (T > TL.flip ? Math.exp(-(T - TL.flip) * 4) * 0.22 : 0) + (T > TL.split ? Math.exp(-(T - TL.split) * 6) * 0.05 : 0);
-  const deep = win(T, TL.lattice - 0.6, TL.pull + 0.8, 0.6, 0.6);
-  P.bloom = 0.95 - deep * 0.3; P.threshold = 0.85 + deep * 0.25; P.exposure = 1.05 - deep * 0.12;
+  P.flash = (T > TL.flip ? Math.exp(-(T - TL.flip) * 4) * 0.12 : 0) + (T > TL.split ? Math.exp(-(T - TL.split) * 6) * 0.03 : 0);
+  P.bloom = 0.42; P.threshold = 1.1; P.exposure = 1.0;
+  P.ao = aoNow[0]; P.aoRadius = Df * aoNow[1];
   post.render(bg);
   HUD.update(T, cam.D);
   return T;
@@ -7188,6 +7568,8 @@ function loop(now) {
 // (story-time arguments, as before; *Film variants take film-clock seconds)
 window.__lab = {
   get story() { return STORY; }, StoryKit, MiniC, applyStory,
+  // the shared hardware-look kit (tests and tools inspect it)
+  kit: { HW, TEX, hwMat, hwCells, hlFrame, setFrame, setHL, shade, Callouts, FOV, LAYER, LAYERS, QUALITY, post: () => post, lights: { key, fillL, rim }, THREE },
   editor: { get open() { return Editor.open; }, show: () => Editor.show(), hide: () => Editor.hide(), analyze: () => Editor.analyze(), run: () => Editor.run(), demo: () => Editor.backToDemo(),
     setCode: (src) => { Editor.el.text.value = src; Editor.render(); return Editor.analyze(); }, get status() { return Editor.el.status.textContent; }, get pick() { return Editor.pick; }, set pick(v) { Editor.pick = v; } },
   TL, STAGES, timeline, get T() { return timeline.T; }, get F() { return timeline.F; },
